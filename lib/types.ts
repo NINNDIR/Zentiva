@@ -65,14 +65,22 @@ export interface ContactoOficial {
 export interface Domicilio {
   calle_numero: string;
   colonia: string;
+  colonia_id?: string;
+  colonia_otro?: boolean;
+  colonia_pendiente_revision?: boolean;
 }
 
-export interface Colonia {
+export interface ColoniaCatalog {
   id: string;
   nombre: string;
   codigo_postal?: string;
   municipio?: string;
+  activa: boolean;
+  pendiente_revision?: boolean;
+  creada_por_usuario?: boolean;
 }
+
+export type Colonia = ColoniaCatalog;
 
 export interface Alumno {
   matricula: string;
@@ -216,7 +224,91 @@ export interface EventoRapido {
   registrado_por: string;
 }
 
-export type TipoEventoTimeline = 'INCIDENTE_GRAVE' | 'RETARDO' | 'CANALIZACIÓN' | 'NOTA' | 'PASE_SALIDA';
+export interface SalidaExtraordinaria {
+  id: string;
+  alumno_matricula: string;
+  alumno_nombre: string;
+  grado_grupo: string;
+  fecha_hora: string; // YYYY-MM-DD HH:mm
+  tipo_visitante: 'CONTACTO_REGISTRADO' | 'CUARTO_VISITANTE';
+  contacto_oficial_id?: string;
+  quien_retira_nombre: string;
+  quien_retira_parentesco: string;
+  ine_folio: string;
+  medio_autorizacion: string;
+  motivo: string;
+  validacion_ine_fisica_confirmada: boolean;
+  registrado_por_uid?: string;
+  registrado_por_nombre: string;
+  creado_el?: string;
+}
+
+export interface RetardoRecord {
+  id: string;
+  alumno_matricula: string;
+  alumno_nombre: string;
+  grado: number;
+  grupo: string;
+  grado_grupo: string;
+  fecha: string; // YYYY-MM-DD
+  hora: string; // HH:mm
+  fecha_hora: string; // YYYY-MM-DD HH:mm
+  motivo: string;
+  es_masivo?: boolean;
+  registrado_por_uid?: string;
+  registrado_por_nombre: string;
+  creado_el?: string;
+}
+
+export interface JustificanteMedico {
+  id: string;
+  folio: string; // ej. JUST-2026-0001
+  alumno_matricula: string;
+  alumno_nombre: string;
+  grado_grupo: string;
+  fecha_emision: string; // YYYY-MM-DD
+  fecha_inicio: string; // YYYY-MM-DD
+  fecha_fin: string; // YYYY-MM-DD
+  dias_totales: number;
+  motivo_medico: string;
+  institucion_medica?: string;
+  medico_nombre?: string;
+  observaciones?: string;
+  registrado_por_uid?: string;
+  registrado_por_nombre: string;
+  creado_el?: string;
+}
+
+export type EstatusCanalizacion = 'PENDIENTE' | 'EN_PROCESO' | 'ATENDIDO' | 'FINALIZADO';
+
+export interface CanalizacionExterna {
+  id: string;
+  folio: string; // ej. CANAL-2026-0001
+  alumno_matricula: string;
+  alumno_nombre: string;
+  grado_grupo: string;
+  fecha_canalizacion: string; // YYYY-MM-DD
+  institucion_destino: string; // DIF, USAER, Salud Mental, CAPEP, etc.
+  motivo_canalizacion: string;
+  estatus: EstatusCanalizacion;
+  tutor_notificado: boolean;
+  observaciones_seguimiento?: string;
+  registrado_por_uid?: string;
+  registrado_por_nombre: string;
+  creado_el?: string;
+}
+
+export interface InstitucionCanalizacionCatalog {
+  id: string;
+  nombre: string;
+  tipo: 'DIF' | 'USAER' | 'SALUD_MENTAL' | 'CAPEP' | 'TRABAJO_SOCIAL_EXTERNO' | 'PANNARTI' | 'PROCURADURÍA' | 'OTRA';
+  telefono?: string;
+  direccion?: string;
+  contacto_principal?: string;
+  activa: boolean;
+}
+
+export type TipoEventoTimeline = 'INCIDENTE_GRAVE' | 'RETARDO' | 'CANALIZACIÓN' | 'NOTA' | 'PASE_SALIDA' | 'JUSTIFICANTE';
 
 export interface EventoTimeline {
   id: string;

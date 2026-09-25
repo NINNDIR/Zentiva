@@ -12,6 +12,8 @@ import {
   Sparkles,
   ShieldAlert,
   ChevronDown,
+  LogOut,
+  FileCheck,
 } from "lucide-react";
 
 interface Props {
@@ -37,6 +39,22 @@ export const ActivityStream: React.FC<Props> = ({ alumnoMatricula }) => {
 
   const getEventCardStyle = (tipo: TipoEventoTimeline) => {
     switch (tipo) {
+      case "JUSTIFICANTE":
+        return {
+          cardBg: "bg-emerald-50/70 border-emerald-200",
+          iconBg: "bg-emerald-100 text-emerald-700 border-emerald-300",
+          badge: "bg-emerald-100 text-emerald-800 border-emerald-300",
+          label: "JUSTIFICANTE MÉDICO",
+          icon: FileCheck,
+        };
+      case "PASE_SALIDA":
+        return {
+          cardBg: "bg-purple-50/70 border-purple-200",
+          iconBg: "bg-purple-100 text-purple-700 border-purple-300",
+          badge: "bg-purple-100 text-purple-800 border-purple-300",
+          label: "SALIDA EXTRAORDINARIA DE MENOR",
+          icon: LogOut,
+        };
       case "INCIDENTE_GRAVE":
         return {
           cardBg: "bg-rose-50/70 border-rose-200",
@@ -55,10 +73,10 @@ export const ActivityStream: React.FC<Props> = ({ alumnoMatricula }) => {
         };
       case "CANALIZACIÓN":
         return {
-          cardBg: "bg-blue-50/70 border-blue-200",
-          iconBg: "bg-blue-100 text-blue-700 border-blue-300",
-          badge: "bg-blue-100 text-blue-800 border-blue-300",
-          label: "CANALIZACIÓN PREVENTIVA",
+          cardBg: "bg-sky-50/70 border-sky-200",
+          iconBg: "bg-sky-100 text-sky-700 border-sky-300",
+          badge: "bg-sky-100 text-sky-800 border-sky-300",
+          label: "CANALIZACIÓN EXTERNA",
           icon: Sparkles,
         };
       default:

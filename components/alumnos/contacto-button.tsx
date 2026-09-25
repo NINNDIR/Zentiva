@@ -1,3 +1,5 @@
+"use client";
+
 import React from "react";
 import { Phone, MessageCircle } from "lucide-react";
 
@@ -21,6 +23,15 @@ export const ContactoButton: React.FC<ContactoButtonProps> = ({
   const telUrl = `tel:${cleanNumber}`;
 
   const buttonPadding = size === "sm" ? "px-2.5 py-1 text-xs" : "px-3 py-1.5 text-xs";
+
+  if (!cleanNumber || cleanNumber.length < 7) {
+    return (
+      <span className="text-[11px] text-slate-400 font-mono italic flex items-center gap-1">
+        <Phone className="w-3 h-3 text-slate-300" />
+        Sin teléfono registrado
+      </span>
+    );
+  }
 
   return (
     <div className="flex items-center space-x-2">

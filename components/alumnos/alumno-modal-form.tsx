@@ -1,8 +1,9 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
-import { Alumno, Colonia, ContactoOficial, generarMatriculaPorGrado } from "@/lib/types";
-import { getColonias, saveAlumno } from "@/lib/firestore-service";
+import { Alumno, ContactoOficial, generarMatriculaPorGrado, calcularEdad } from "@/lib/types";
+import { saveAlumno } from "@/lib/firestore-service";
+import { ColoniaSelect } from "./colonia-select";
 import { X, UserPlus, Save, ShieldCheck, Phone, IdCard, Home, Briefcase } from "lucide-react";
 
 interface Props {
@@ -18,7 +19,6 @@ export const AlumnoModalForm: React.FC<Props> = ({
   onSaved,
   initialAlumno,
 }) => {
-  const [coloniasList, setColoniasList] = useState<Colonia[]>([]);
   const [saving, setSaving] = useState(false);
 
   // Form State
@@ -32,9 +32,12 @@ export const AlumnoModalForm: React.FC<Props> = ({
   const [fechaNacimiento, setFechaNacimiento] = useState("2014-05-10");
   const [sexo, setSexo] = useState<"M" | "F">("M");
   
-  // Address
+  // Address & Colonia
   const [calleNumero, setCalleNumero] = useState("");
   const [coloniaStr, setColoniaStr] = useState("FELIPE CARRILLO PUERTO");
+  const [coloniaId, setColoniaId] = useState("");
+  const [coloniaOtro, setColoniaOtro] = useState(false);
+  const [coloniaPendiente, setColoniaPendiente] = useState(false);
 
   // Contact 1
   const [t1Nombre, setT1Nombre] = useState("");
@@ -59,7 +62,6 @@ export const AlumnoModalForm: React.FC<Props> = ({
   const [t3TelTrabajo, setT3TelTrabajo] = useState("");
 
   useEffect(() => {
-    loadColonias();
     if (initialAlumno) {
       setMatricula(initialAlumno.matricula);
       setCurp(initialAlumno.curp);
@@ -72,6 +74,9 @@ export const AlumnoModalForm: React.FC<Props> = ({
       setSexo(initialAlumno.sexo);
       setCalleNumero(initialAlumno.domicilio.calle_numero);
       setColoniaStr(initialAlumno.domicilio.colonia);
+      setColoniaId(initialAlumno.domicilio.colonia_id || "");
+      setColoniaOtro(!!initialAlumno.domicilio.colonia_otro);
+      setColoniaPendiente(!!initialAlumno.domicilio.colonia_pendiente_revision);
 
       const c1 = initialAlumno.contactos_oficiales.find((c) => c.prioridad === 1);
       if (c1) {
@@ -102,6 +107,9 @@ export const AlumnoModalForm: React.FC<Props> = ({
       }
     } else {
       updateMatriculaForGrado(1);
+      setColoniaOtro(false);
+      setColoniaPendiente(false);
+      setColoniaId("");
     }
   }, [isOpen, initialAlumno]);
 
@@ -109,11 +117,6 @@ export const AlumnoModalForm: React.FC<Props> = ({
     if (initialAlumno) return;
     const randNum = Math.floor(Math.random() * 80) + 10;
     setMatricula(generarMatriculaPorGrado(g, randNum));
-  };
-
-  const loadColonias = async () => {
-    const list = await getColonias();
-    setColoniasList(list);
   };
 
   if (!isOpen) return null;
@@ -181,10 +184,13 @@ export const AlumnoModalForm: React.FC<Props> = ({
       domicilio: {
         calle_numero: calleNumero.toUpperCase(),
         colonia: normColonia || "FELIPE CARRILLO PUERTO",
+        colonia_id: coloniaId || undefined,
+        colonia_otro: coloniaOtro,
+        colonia_pendiente_revision: coloniaPendiente,
       },
       contactos_oficiales: contactos,
       estatus: "ACTIVO",
-      creado_el: new Date().toISOString(),
+      creado_el: initialAlumno?.creado_el || new Date().toISOString(),
     };
 
     await saveAlumno(alumnoData);
@@ -326,12 +332,21 @@ export const AlumnoModalForm: React.FC<Props> = ({
             </div>
 
             <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1">Fecha de Nacimiento (YYYY-MM-DD)</label>
+              <div className="flex items-center justify-between mb-1">
+                <label className="block text-xs font-bold text-slate-700">
+                  Fecha de Nacimiento (YYYY-MM-DD) *
+                </label>
+                <span className="text-xs font-bold text-cyan-800 bg-cyan-100 px-2.5 py-0.5 rounded-full border border-cyan-200 flex items-center gap-1 shadow-2xs">
+                  <span>🎂 Edad calculada:</span>
+                  <strong className="text-cyan-950 font-black">{calcularEdad(fechaNacimiento)} años</strong>
+                </span>
+              </div>
               <input
                 type="date"
+                required
                 value={fechaNacimiento}
                 onChange={(e) => setFechaNacimiento(e.target.value)}
-                className="w-full p-2.5 bg-slate-50 border border-slate-300 rounded-lg text-sm focus:outline-none focus:border-cyan-600"
+                className="w-full p-2.5 bg-slate-50 border border-slate-300 rounded-lg text-sm focus:outline-none focus:border-cyan-600 font-medium"
               />
             </div>
           </div>
@@ -340,13 +355,14 @@ export const AlumnoModalForm: React.FC<Props> = ({
           <div className="space-y-3">
             <h3 className="font-bold text-slate-900 border-b pb-1 font-mono text-xs text-cyan-800 flex items-center gap-1.5">
               <Home className="w-4 h-4 text-cyan-600" />
-              DOMICILIO PARTICULAR Y COLONIA NORMALIZADA
+              DOMICILIO PARTICULAR Y CATÁLOGO DE COLONIAS
             </h3>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">Calle y Número</label>
+                <label className="block text-xs font-bold text-slate-700 mb-1">Calle y Número *</label>
                 <input
                   type="text"
+                  required
                   value={calleNumero}
                   onChange={(e) => setCalleNumero(e.target.value)}
                   placeholder="ej. NIÑOS HEROES NO. 13"
@@ -354,13 +370,16 @@ export const AlumnoModalForm: React.FC<Props> = ({
                 />
               </div>
               <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">Colonia (Cadena Normalizada)</label>
-                <input
-                  type="text"
+                <ColoniaSelect
                   value={coloniaStr}
-                  onChange={(e) => setColoniaStr(e.target.value)}
-                  placeholder="ej. FELIPE CARRILLO PUERTO"
-                  className="w-full p-2.5 bg-slate-50 border border-slate-300 rounded-lg text-sm font-bold uppercase focus:outline-none focus:border-cyan-600"
+                  coloniaOtro={coloniaOtro}
+                  coloniaPendiente={coloniaPendiente}
+                  onChange={({ colonia, colonia_id, colonia_otro, colonia_pendiente_revision }) => {
+                    setColoniaStr(colonia);
+                    setColoniaId(colonia_id || "");
+                    setColoniaOtro(colonia_otro);
+                    setColoniaPendiente(colonia_pendiente_revision);
+                  }}
                 />
               </div>
             </div>

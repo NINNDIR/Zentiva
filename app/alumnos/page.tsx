@@ -1,10 +1,9 @@
 "use client";
 
 import React, { useEffect, useState } from "react";
-import { Navbar } from "@/components/navbar";
 import { useAuth } from "@/lib/auth-context";
 import { Alumno } from "@/lib/types";
-import { getAlumnos } from "@/lib/firestore-service";
+import { subscribeAlumnos } from "@/lib/firestore-service";
 import { AlumnoFormView } from "@/components/alumnos/alumno-form-view";
 import { AlumnoModalForm } from "@/components/alumnos/alumno-modal-form";
 import { CSVImportModal } from "@/components/alumnos/csv-import-modal";
@@ -16,6 +15,7 @@ import {
   FileSpreadsheet,
   Filter,
   ChevronRight,
+  Radio,
 } from "lucide-react";
 
 export default function AlumnosPage() {
@@ -40,18 +40,28 @@ export default function AlumnosPage() {
   const isDirectivo = user?.role === "DIRECTIVO";
 
   useEffect(() => {
-    loadAlumnosData();
-  }, []);
-
-  const loadAlumnosData = async () => {
     setLoading(true);
-    const list = await getAlumnos();
-    setAlumnos(list);
-    if (list.length > 0 && !selectedAlumno) {
-      setSelectedAlumno(list[0]);
-    }
-    setLoading(false);
-  };
+    const unsubscribe = subscribeAlumnos(
+      (list) => {
+        setAlumnos(list);
+        setSelectedAlumno((prev) => {
+          if (!prev && list.length > 0) return list[0];
+          if (prev) {
+            const updated = list.find((a) => a.matricula === prev.matricula);
+            return updated || list[0] || null;
+          }
+          return null;
+        });
+        setLoading(false);
+      },
+      (err) => {
+        console.error("Error subscribing to alumnos in real-time:", err);
+        setLoading(false);
+      }
+    );
+
+    return () => unsubscribe();
+  }, []);
 
   const handleOpenNewModal = () => {
     setEditingAlumno(null);
@@ -291,7 +301,7 @@ export default function AlumnosPage() {
       <AlumnoModalForm
         isOpen={isFormModalOpen}
         onClose={() => setIsFormModalOpen(false)}
-        onSaved={loadAlumnosData}
+        onSaved={() => {}}
         initialAlumno={editingAlumno}
       />
 
@@ -299,7 +309,7 @@ export default function AlumnosPage() {
       <CSVImportModal
         isOpen={isCSVModalOpen}
         onClose={() => setIsCSVModalOpen(false)}
-        onImportComplete={loadAlumnosData}
+        onImportComplete={() => {}}
       />
 
       {/* Delete / Deactivate Student Modal */}
@@ -307,7 +317,7 @@ export default function AlumnosPage() {
         isOpen={isDeleteModalOpen}
         alumno={deletingAlumno}
         onClose={() => setIsDeleteModalOpen(false)}
-        onDeleted={loadAlumnosData}
+        onDeleted={() => {}}
       />
     </div>
   );

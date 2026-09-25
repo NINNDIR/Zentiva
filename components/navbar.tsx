@@ -15,6 +15,9 @@ import {
   Sparkles,
   Building2,
   UserCheck,
+  FileCheck,
+  BarChart3,
+  ShieldCheck,
 } from "lucide-react";
 
 export const Navbar: React.FC = () => {
@@ -31,10 +34,16 @@ export const Navbar: React.FC = () => {
     { label: "Alumnos & Expedientes", href: "/alumnos", icon: Users },
     { label: "Incidentes", href: "/incidentes", icon: ShieldAlert },
     { label: "Pase de Salida & Retardos", href: "/eventos-rapidos", icon: Clock },
+    { label: "Justificantes", href: "/justificantes", icon: FileCheck },
+    { label: "Canalizaciones", href: "/canalizaciones", icon: Sparkles },
   ];
 
-  if (user.role === "SUPER_USUARIO" || user.role === "TRABAJADORA_SOCIAL") {
-    navItems.push({ label: "Catálogo Faltas", href: "/admin/faltas", icon: Sparkles });
+  if (user.role === "DIRECTIVO" || user.role === "SUPER_USUARIO") {
+    navItems.push({ label: "Analítica Directiva", href: "/dashboard/directivo", icon: BarChart3 });
+  }
+
+  if (user.role === "SUPER_USUARIO") {
+    navItems.push({ label: "Panel Admin", href: "/admin", icon: ShieldCheck });
   }
 
   const getRoleIcon = () => {

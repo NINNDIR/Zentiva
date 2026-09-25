@@ -12,8 +12,29 @@ import {
   where,
   orderBy,
   writeBatch,
+  onSnapshot,
 } from "firebase/firestore";
-import { Alumno, Colonia, NotaConfidencial, UserProfile, UserRole, EventoTimeline, OFFICIAL_PLANTEL, FaltaCatalog, Incidente, AnexoComentario, AuditLogEntry, EventoRapido } from "./types";
+import {
+  Alumno,
+  Colonia,
+  ColoniaCatalog,
+  NotaConfidencial,
+  UserProfile,
+  UserRole,
+  EventoTimeline,
+  OFFICIAL_PLANTEL,
+  FaltaCatalog,
+  Incidente,
+  AnexoComentario,
+  AuditLogEntry,
+  EventoRapido,
+  SalidaExtraordinaria,
+  RetardoRecord,
+  JustificanteMedico,
+  CanalizacionExterna,
+  EstatusCanalizacion,
+  InstitucionCanalizacionCatalog,
+} from "./types";
 import { INITIAL_ALUMNOS, INITIAL_COLONIAS, INITIAL_NOTAS, INITIAL_EVENTS, INITIAL_FALTAS, INITIAL_INCIDENTES, INITIAL_EVENTOS_RAPIDOS } from "./mock-data";
 
 // Helper function: Sanitiza cualquier objeto convirtiendo valores `undefined` o `NaN` a cadenas vacías "" para Firestore
@@ -114,13 +135,69 @@ export async function getOrSeedUserProfile(uid: string, email: string): Promise<
   return newProfile;
 }
 
-// ---------------- ALUMNOS (FIRESTORE REAL CON SANITIZACIÓN) ----------------
+// ---------------- ALUMNOS (FIRESTORE REAL EN TIEMPO REAL) ----------------
+
+/**
+ * Suscripción en tiempo real a la colección de Alumnos en Firestore.
+ * Notifica automáticamente cualquier inserción, modificación o eliminación.
+ */
+export function subscribeAlumnos(
+  onUpdate: (alumnos: Alumno[]) => void,
+  onError?: (err: Error) => void
+): () => void {
+  if (db && process.env.NEXT_PUBLIC_FIREBASE_API_KEY && process.env.NEXT_PUBLIC_FIREBASE_API_KEY !== "demo-api-key-zentiva") {
+    try {
+      const q = collection(db, "alumnos");
+      const unsubscribe = onSnapshot(
+        q,
+        (snap) => {
+          if (!snap.empty) {
+            const list = snap.docs.map((d) => {
+              const data = d.data() as any;
+              // Asegurar que la edad estática no exista en memoria
+              if ("edad" in data) delete data.edad;
+              return data as Alumno;
+            });
+            setLocal(STORAGE_KEY_ALUMNOS, list);
+            onUpdate(list);
+          } else {
+            // Si la colección está vacía en Firestore, sembrar datos iniciales
+            seedAlumnosIfEmpty();
+            const cached = getLocal<Alumno[]>(STORAGE_KEY_ALUMNOS, INITIAL_ALUMNOS);
+            onUpdate(cached);
+          }
+        },
+        (err) => {
+          console.warn("Firestore subscribeAlumnos error, usando caché local:", err);
+          if (onError) onError(err);
+          const cached = getLocal<Alumno[]>(STORAGE_KEY_ALUMNOS, INITIAL_ALUMNOS);
+          onUpdate(cached);
+        }
+      );
+      return unsubscribe;
+    } catch (err: any) {
+      console.warn("Error iniciando listener onSnapshot de alumnos:", err);
+      if (onError) onError(err);
+    }
+  }
+
+  const cached = getLocal<Alumno[]>(STORAGE_KEY_ALUMNOS, INITIAL_ALUMNOS);
+  onUpdate(cached);
+  return () => {};
+}
+
 export async function getAlumnos(): Promise<Alumno[]> {
   try {
     if (db && process.env.NEXT_PUBLIC_FIREBASE_API_KEY && process.env.NEXT_PUBLIC_FIREBASE_API_KEY !== "demo-api-key-zentiva") {
       const snap = await getDocs(collection(db, "alumnos"));
       if (!snap.empty) {
-        return snap.docs.map((d) => d.data() as Alumno);
+        return snap.docs.map((d) => {
+          const data = d.data() as any;
+          if ("edad" in data) delete data.edad;
+          return data as Alumno;
+        });
+      } else {
+        await seedAlumnosIfEmpty();
       }
     }
   } catch (err) {
@@ -142,20 +219,38 @@ export async function getAlumnoByMatricula(matricula: string): Promise<Alumno | 
 export async function saveAlumno(alumno: Alumno): Promise<void> {
   const cleanAlumno = sanitizeForFirestore(alumno);
 
+  // Asegurar que la edad no se guarde como campo estático en Firestore
+  if ("edad" in cleanAlumno) {
+    delete (cleanAlumno as any).edad;
+  }
+
   try {
     if (db && process.env.NEXT_PUBLIC_FIREBASE_API_KEY && process.env.NEXT_PUBLIC_FIREBASE_API_KEY !== "demo-api-key-zentiva") {
+      // 1. Guardar documento del alumno con Document ID fijado a su Matrícula
       await setDoc(doc(db, "alumnos", cleanAlumno.matricula), cleanAlumno, { merge: true });
       
+      // 2. Si la colonia es nueva / pendiente de revisión, guardarla en cat_colonias para el SysAdmin
       if (cleanAlumno.domicilio?.colonia) {
-        const colName = cleanAlumno.domicilio.colonia.toUpperCase();
-        const colId = `col_${colName.toLowerCase().replace(/\s+/g, "_")}`;
-        const cleanCol = sanitizeForFirestore({ id: colId, nombre: colName });
-        await setDoc(doc(db, "colonias", colId), cleanCol, { merge: true });
+        const colName = cleanAlumno.domicilio.colonia.toUpperCase().trim();
+        const colId = `col_${colName.toLowerCase().replace(/[^a-z0-9]/g, "_")}`;
+        const isOtro = !!cleanAlumno.domicilio.colonia_otro;
+        const isPendiente = !!cleanAlumno.domicilio.colonia_pendiente_revision;
+
+        const cleanCol = sanitizeForFirestore<ColoniaCatalog>({
+          id: colId,
+          nombre: colName,
+          activa: true,
+          pendiente_revision: isPendiente || isOtro,
+          creada_por_usuario: isOtro,
+        });
+
+        await setDoc(doc(db, "cat_colonias", colId), cleanCol, { merge: true });
       }
-      console.log(`[Zentiva Firestore] Alumno ${cleanAlumno.matricula} guardado correctamente.`);
+
+      console.log(`[Zentiva Firestore] Alumno ${cleanAlumno.matricula} guardado correctamente en tiempo real.`);
     }
   } catch (err: any) {
-    console.error("Error al subir a Firestore:", err);
+    console.error("Error al subir alumno a Firestore:", err);
     throw err;
   }
 
@@ -206,8 +301,12 @@ export async function bulkImportAlumnos(
 ): Promise<{ count: number }> {
   console.log(`[Zentiva Firestore] Sanitizando e importando batch de ${alumnosList.length} alumnos...`);
 
-  // Sanitizar todos los objetos de alumnos para reemplazar undefined/NaN con ""
-  const cleanAlumnos = alumnosList.map((a) => sanitizeForFirestore(a));
+  // Sanitizar todos los objetos de alumnos y asegurar que edad estática no se persista
+  const cleanAlumnos = alumnosList.map((a) => {
+    const clean = sanitizeForFirestore(a);
+    if ("edad" in clean) delete (clean as any).edad;
+    return clean;
+  });
 
   if (db && process.env.NEXT_PUBLIC_FIREBASE_API_KEY && process.env.NEXT_PUBLIC_FIREBASE_API_KEY !== "demo-api-key-zentiva") {
     try {
@@ -219,16 +318,21 @@ export async function bulkImportAlumnos(
         batch.set(ref, alumno, { merge: true });
       }
 
-      // 2. SetDoc with merge = true for unique colonias
+      // 2. SetDoc with merge = true for unique colonias in cat_colonias
       for (const colName of coloniasUnicas) {
         const norm = colName.toUpperCase().trim();
-        const colId = `col_${norm.toLowerCase().replace(/\s+/g, "_")}`;
-        const colRef = doc(db, "colonias", colId);
-        const cleanCol = sanitizeForFirestore({ id: colId, nombre: norm });
+        const colId = `col_${norm.toLowerCase().replace(/[^a-z0-9]/g, "_")}`;
+        const colRef = doc(db, "cat_colonias", colId);
+        const cleanCol = sanitizeForFirestore<ColoniaCatalog>({
+          id: colId,
+          nombre: norm,
+          activa: true,
+          pendiente_revision: false,
+        });
         batch.set(colRef, cleanCol, { merge: true });
       }
 
-      console.log("[Zentiva Firestore] Ejecutando await batch.commit()...");
+      console.log("[Zentiva Firestore] Ejecutando batch.commit()...");
       await batch.commit();
       console.log("¡Éxito al escribir batch en Firestore!");
     } catch (err: any) {
@@ -251,24 +355,108 @@ export async function bulkImportAlumnos(
   return { count: cleanAlumnos.length };
 }
 
-// ---------------- COLONIAS ----------------
-export async function getColonias(): Promise<Colonia[]> {
+// ---------------- CATÁLOGO DE COLONIAS (cat_colonias) ----------------
+
+/**
+ * Suscripción en tiempo real a la colección 'cat_colonias' en Firestore.
+ */
+export function subscribeColonias(
+  onUpdate: (colonias: ColoniaCatalog[]) => void,
+  onError?: (err: Error) => void
+): () => void {
+  if (db && process.env.NEXT_PUBLIC_FIREBASE_API_KEY && process.env.NEXT_PUBLIC_FIREBASE_API_KEY !== "demo-api-key-zentiva") {
+    try {
+      const q = collection(db, "cat_colonias");
+      const unsubscribe = onSnapshot(
+        q,
+        (snap) => {
+          if (!snap.empty) {
+            const list = snap.docs.map((d) => d.data() as ColoniaCatalog);
+            setLocal(STORAGE_KEY_COLONIAS, list);
+            onUpdate(list);
+          } else {
+            seedCatColoniasIfEmpty();
+            const cached = getLocal<ColoniaCatalog[]>(STORAGE_KEY_COLONIAS, INITIAL_COLONIAS);
+            onUpdate(cached);
+          }
+        },
+        (err) => {
+          console.warn("Firestore onSnapshot cat_colonias error:", err);
+          if (onError) onError(err);
+          const cached = getLocal<ColoniaCatalog[]>(STORAGE_KEY_COLONIAS, INITIAL_COLONIAS);
+          onUpdate(cached);
+        }
+      );
+      return unsubscribe;
+    } catch (err: any) {
+      console.warn("Error subscribing to cat_colonias:", err);
+      if (onError) onError(err);
+    }
+  }
+
+  const cached = getLocal<ColoniaCatalog[]>(STORAGE_KEY_COLONIAS, INITIAL_COLONIAS);
+  onUpdate(cached);
+  return () => {};
+}
+
+export async function getColonias(): Promise<ColoniaCatalog[]> {
   try {
     if (db && process.env.NEXT_PUBLIC_FIREBASE_API_KEY && process.env.NEXT_PUBLIC_FIREBASE_API_KEY !== "demo-api-key-zentiva") {
-      const snap = await getDocs(collection(db, "colonias"));
+      const snap = await getDocs(collection(db, "cat_colonias"));
       if (!snap.empty) {
-        return snap.docs.map((d) => d.data() as Colonia);
+        return snap.docs.map((d) => d.data() as ColoniaCatalog);
+      } else {
+        await seedCatColoniasIfEmpty();
       }
     }
   } catch (err) {
-    console.warn("Firestore fetch colonias fallback:", err);
+    console.warn("Firestore fetch cat_colonias fallback:", err);
   }
 
-  const cached = getLocal<Colonia[]>(STORAGE_KEY_COLONIAS, INITIAL_COLONIAS);
+  const cached = getLocal<ColoniaCatalog[]>(STORAGE_KEY_COLONIAS, INITIAL_COLONIAS);
   if (!localStorage.getItem(STORAGE_KEY_COLONIAS)) {
     setLocal(STORAGE_KEY_COLONIAS, INITIAL_COLONIAS);
   }
   return cached;
+}
+
+export async function seedCatColoniasIfEmpty(): Promise<void> {
+  if (!db || !process.env.NEXT_PUBLIC_FIREBASE_API_KEY || process.env.NEXT_PUBLIC_FIREBASE_API_KEY === "demo-api-key-zentiva") return;
+  try {
+    const snap = await getDocs(collection(db, "cat_colonias"));
+    if (snap.empty) {
+      const batch = writeBatch(db);
+      for (const col of INITIAL_COLONIAS) {
+        const docRef = doc(db, "cat_colonias", col.id);
+        const data: ColoniaCatalog = { ...col, activa: true, pendiente_revision: false };
+        batch.set(docRef, sanitizeForFirestore(data));
+      }
+      await batch.commit();
+      console.log("[Zentiva Firestore] cat_colonias sembrada exitosamente.");
+    }
+  } catch (err) {
+    console.warn("No se pudo sembrar cat_colonias:", err);
+  }
+}
+
+export async function seedAlumnosIfEmpty(): Promise<void> {
+  if (!db || !process.env.NEXT_PUBLIC_FIREBASE_API_KEY || process.env.NEXT_PUBLIC_FIREBASE_API_KEY === "demo-api-key-zentiva") return;
+  try {
+    const snap = await getDocs(collection(db, "alumnos"));
+    if (snap.empty) {
+      const batch = writeBatch(db);
+      for (const al of INITIAL_ALUMNOS) {
+        const docRef = doc(db, "alumnos", al.matricula);
+        const clean = sanitizeForFirestore(al);
+        if ("edad" in clean) delete (clean as any).edad;
+        batch.set(docRef, clean);
+      }
+      await batch.commit();
+      console.log("[Zentiva Firestore] Colección alumnos sembrada exitosamente.");
+    }
+  } catch (err) {
+    console.warn("No se pudo sembrar alumnos:", err);
+  }
 }
 
 // ---------------- NOTAS CONFIDENCIALES ----------------
@@ -357,6 +545,60 @@ export async function getEventosTimeline(matricula: string): Promise<EventoTimel
         });
       });
 
+      const qSalidas = query(
+        collection(db, "salidas_extraordinarias"),
+        where("alumno_matricula", "==", matricula)
+      );
+      const snapSalidas = await getDocs(qSalidas);
+      snapSalidas.forEach((docSnap) => {
+        const d = docSnap.data();
+        events.push({
+          id: docSnap.id,
+          alumno_matricula: matricula,
+          fecha: d.fecha_hora || d.creado_el || "Fecha N/A",
+          tipo: "PASE_SALIDA",
+          titulo: `SALIDA EXTRAORDINARIA: Retirado por ${d.quien_retira_nombre} (${d.quien_retira_parentesco})`,
+          descripcion: `Motivo: ${d.motivo || "Sin especificar"}. Folio INE: ${d.ine_folio || "N/A"}. Validación telefónica y resguardo de copia física en expediente confirmados.`,
+          autor: d.registrado_por_nombre || d.registrado_por || "Trabajo Social",
+        });
+      });
+
+      const qJust = query(
+        collection(db, "justificantes"),
+        where("alumno_matricula", "==", matricula)
+      );
+      const snapJust = await getDocs(qJust);
+      snapJust.forEach((docSnap) => {
+        const d = docSnap.data();
+        events.push({
+          id: docSnap.id,
+          alumno_matricula: matricula,
+          fecha: d.fecha_emision || d.creado_el || "Fecha N/A",
+          tipo: "JUSTIFICANTE",
+          titulo: `JUSTIFICANTE MÉDICO (${d.folio || "S/F"})`,
+          descripcion: `Ausencia: ${d.fecha_inicio} al ${d.fecha_fin} (${d.dias_totales} días). Motivo: ${d.motivo_medico}. Institución: ${d.institucion_medica || "N/A"}.`,
+          autor: d.registrado_por_nombre || "Trabajo Social",
+        });
+      });
+
+      const qCanal = query(
+        collection(db, "canalizaciones"),
+        where("alumno_matricula", "==", matricula)
+      );
+      const snapCanal = await getDocs(qCanal);
+      snapCanal.forEach((docSnap) => {
+        const d = docSnap.data();
+        events.push({
+          id: docSnap.id,
+          alumno_matricula: matricula,
+          fecha: d.fecha_canalizacion || d.creado_el || "Fecha N/A",
+          tipo: "CANALIZACIÓN",
+          titulo: `CANALIZACIÓN EXTERNA: ${d.institucion_destino}`,
+          descripcion: `Motivo: ${d.motivo_canalizacion}. Estatus: [${d.estatus}]. Tutor Notificado: ${d.tutor_notificado ? "Sí" : "No"}. ${d.observaciones_seguimiento || ""}`,
+          autor: d.registrado_por_nombre || "Trabajo Social",
+        });
+      });
+
       if (events.length > 0) {
         return events.sort((a, b) => b.fecha.localeCompare(a.fecha));
       }
@@ -365,8 +607,56 @@ export async function getEventosTimeline(matricula: string): Promise<EventoTimel
     console.warn("Firestore fetch events fallback:", err);
   }
 
-  const cachedEvents = getLocal<EventoTimeline[]>(STORAGE_KEY_EVENTS, INITIAL_EVENTS);
-  return cachedEvents.filter((e) => e.alumno_matricula === matricula);
+  const cachedEvents = getLocal<EventoTimeline[]>(STORAGE_KEY_EVENTS, INITIAL_EVENTS).filter(
+    (e) => e.alumno_matricula === matricula
+  );
+  const cachedRetardos = getLocal<RetardoRecord[]>("zentiva_retardos_v5", []).filter(
+    (r) => r.alumno_matricula === matricula
+  );
+  const cachedJustificantes = getLocal<JustificanteMedico[]>("zentiva_justificantes_v5", []).filter(
+    (j) => j.alumno_matricula === matricula
+  );
+  const cachedCanalizaciones = getLocal<CanalizacionExterna[]>("zentiva_canalizaciones_v5", []).filter(
+    (c) => c.alumno_matricula === matricula
+  );
+
+  cachedRetardos.forEach((r) => {
+    cachedEvents.push({
+      id: r.id,
+      alumno_matricula: matricula,
+      fecha: r.fecha_hora || r.fecha || "Fecha N/A",
+      tipo: "RETARDO",
+      titulo: "Retardo de Asistencia",
+      descripcion: r.motivo ? `Retardo: ${r.motivo}` : "Llegada fuera de tolerancia al plantel.",
+      autor: r.registrado_por_nombre || "Prefectura",
+    });
+  });
+
+  cachedJustificantes.forEach((j) => {
+    cachedEvents.push({
+      id: j.id,
+      alumno_matricula: matricula,
+      fecha: j.fecha_emision || j.creado_el || "Fecha N/A",
+      tipo: "JUSTIFICANTE",
+      titulo: `JUSTIFICANTE MÉDICO (${j.folio || "S/F"})`,
+      descripcion: `Ausencia: ${j.fecha_inicio} al ${j.fecha_fin} (${j.dias_totales} días). Motivo: ${j.motivo_medico}. Institución: ${j.institucion_medica || "N/A"}.`,
+      autor: j.registrado_por_nombre || "Trabajo Social",
+    });
+  });
+
+  cachedCanalizaciones.forEach((c) => {
+    cachedEvents.push({
+      id: c.id,
+      alumno_matricula: matricula,
+      fecha: c.fecha_canalizacion || c.creado_el || "Fecha N/A",
+      tipo: "CANALIZACIÓN",
+      titulo: `CANALIZACIÓN EXTERNA: ${c.institucion_destino}`,
+      descripcion: `Motivo: ${c.motivo_canalizacion}. Estatus: [${c.estatus}]. Tutor Notificado: ${c.tutor_notificado ? "Sí" : "No"}. ${c.observaciones_seguimiento || ""}`,
+      autor: c.registrado_por_nombre || "Trabajo Social",
+    });
+  });
+
+  return cachedEvents.sort((a, b) => b.fecha.localeCompare(a.fecha));
 }
 
 // STORAGE KEYS FOR INCIDENTS & CATALOGS
@@ -687,4 +977,507 @@ export async function addEventoRapido(evento: Omit<EventoRapido, "id">): Promise
   setLocal(STORAGE_KEY_EVENTOS_RAPIDOS, list);
 
   return fullEvento;
+}
+
+// ---------------- SALIDAS EXTRAORDINARIAS DE MENOR (salidas_extraordinarias) ----------------
+const STORAGE_KEY_SALIDAS_EXTRAORDINARIAS = "zentiva_salidas_extraordinarias_v5";
+
+export async function getSalidasExtraordinarias(): Promise<SalidaExtraordinaria[]> {
+  try {
+    if (db && process.env.NEXT_PUBLIC_FIREBASE_API_KEY && process.env.NEXT_PUBLIC_FIREBASE_API_KEY !== "demo-api-key-zentiva") {
+      const snap = await getDocs(collection(db, "salidas_extraordinarias"));
+      if (!snap.empty) {
+        return snap.docs.map((d) => ({ id: d.id, ...d.data() }) as SalidaExtraordinaria);
+      }
+    }
+  } catch (err) {
+    console.warn("Firestore getSalidasExtraordinarias fallback:", err);
+  }
+
+  const cached = getLocal<SalidaExtraordinaria[]>(STORAGE_KEY_SALIDAS_EXTRAORDINARIAS, []);
+  return cached;
+}
+
+export async function addSalidaExtraordinaria(
+  salida: Omit<SalidaExtraordinaria, "id">
+): Promise<SalidaExtraordinaria> {
+  const id = `salida-${Date.now()}`;
+  const fullSalida: SalidaExtraordinaria = sanitizeForFirestore({
+    id,
+    creado_el: new Date().toISOString(),
+    ...salida,
+  });
+
+  try {
+    if (db && process.env.NEXT_PUBLIC_FIREBASE_API_KEY && process.env.NEXT_PUBLIC_FIREBASE_API_KEY !== "demo-api-key-zentiva") {
+      // 1. Guardar en colección oficial 'salidas_extraordinarias' en Firestore
+      await setDoc(doc(db, "salidas_extraordinarias", id), fullSalida);
+
+      // 2. Guardar también en 'eventos_rapidos' para compatibilidad con el dashboard de la app
+      await setDoc(
+        doc(db, "eventos_rapidos", id),
+        sanitizeForFirestore({
+          id,
+          tipo: "PASE_SALIDA",
+          alumno_matricula: salida.alumno_matricula,
+          alumno_nombre: salida.alumno_nombre,
+          grado_grupo: salida.grado_grupo,
+          fecha_hora: salida.fecha_hora,
+          quien_retira_nombre: salida.quien_retira_nombre,
+          quien_retira_parentesco: salida.quien_retira_parentesco,
+          medio_autorizacion: salida.medio_autorizacion,
+          ine_folio: salida.ine_folio,
+          ine_fisica_resguardada: salida.validacion_ine_fisica_confirmada,
+          motivo: salida.motivo,
+          registrado_por: salida.registrado_por_nombre,
+        })
+      );
+
+      console.log(`[Zentiva Firestore] Salida extraordinaria de menor (${id}) registrada exitosamente en Firestore.`);
+    }
+  } catch (err) {
+    console.error("Error al guardar salida extraordinaria en Firestore:", err);
+  }
+
+  const list = await getSalidasExtraordinarias();
+  list.unshift(fullSalida);
+  setLocal(STORAGE_KEY_SALIDAS_EXTRAORDINARIAS, list);
+
+  return fullSalida;
+}
+
+// ---------------- MÓDULO DE RETARDOS (retardos) ----------------
+const STORAGE_KEY_RETARDOS = "zentiva_retardos_v5";
+
+export async function getRetardos(): Promise<RetardoRecord[]> {
+  try {
+    if (db && process.env.NEXT_PUBLIC_FIREBASE_API_KEY && process.env.NEXT_PUBLIC_FIREBASE_API_KEY !== "demo-api-key-zentiva") {
+      const snap = await getDocs(collection(db, "retardos"));
+      if (!snap.empty) {
+        return snap.docs.map((d) => ({ id: d.id, ...d.data() }) as RetardoRecord);
+      }
+    }
+  } catch (err) {
+    console.warn("Firestore getRetardos fallback:", err);
+  }
+
+  const cached = getLocal<RetardoRecord[]>(STORAGE_KEY_RETARDOS, []);
+  return cached;
+}
+
+export async function addRetardo(retardo: Omit<RetardoRecord, "id">): Promise<RetardoRecord> {
+  const id = `ret-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+  const fullRetardo: RetardoRecord = sanitizeForFirestore({
+    id,
+    creado_el: new Date().toISOString(),
+    ...retardo,
+  });
+
+  try {
+    if (db && process.env.NEXT_PUBLIC_FIREBASE_API_KEY && process.env.NEXT_PUBLIC_FIREBASE_API_KEY !== "demo-api-key-zentiva") {
+      // 1. Guardar en colección 'retardos' en Firestore
+      await setDoc(doc(db, "retardos", id), fullRetardo);
+
+      // 2. Dual-write en 'eventos_rapidos' para actualizar dashboard global
+      await setDoc(
+        doc(db, "eventos_rapidos", id),
+        sanitizeForFirestore({
+          id,
+          tipo: "RETARDO_MASIVO",
+          alumno_matricula: retardo.alumno_matricula,
+          alumno_nombre: retardo.alumno_nombre,
+          grado_grupo: retardo.grado_grupo,
+          fecha_hora: retardo.fecha_hora,
+          motivo: retardo.motivo,
+          registrado_por: retardo.registrado_por_nombre,
+        })
+      );
+      console.log(`[Zentiva Firestore] Retardo (${id}) registrado exitosamente.`);
+    }
+  } catch (err) {
+    console.error("Error al guardar retardo en Firestore:", err);
+  }
+
+  const list = await getRetardos();
+  list.unshift(fullRetardo);
+  setLocal(STORAGE_KEY_RETARDOS, list);
+
+  return fullRetardo;
+}
+
+export async function addRetardosMasivos(
+  retardosList: Omit<RetardoRecord, "id">[]
+): Promise<RetardoRecord[]> {
+  if (retardosList.length === 0) return [];
+
+  const createdRecords: RetardoRecord[] = [];
+  const now = new Date().toISOString();
+
+  if (db && process.env.NEXT_PUBLIC_FIREBASE_API_KEY && process.env.NEXT_PUBLIC_FIREBASE_API_KEY !== "demo-api-key-zentiva") {
+    try {
+      const batch = writeBatch(db);
+
+      retardosList.forEach((item, index) => {
+        const id = `ret-${Date.now()}-${index}-${Math.floor(Math.random() * 1000)}`;
+        const fullRetardo: RetardoRecord = sanitizeForFirestore({
+          id,
+          creado_el: now,
+          es_masivo: true,
+          ...item,
+        });
+
+        createdRecords.push(fullRetardo);
+
+        // Guardar en 'retardos'
+        const retRef = doc(db, "retardos", id);
+        batch.set(retRef, fullRetardo);
+
+        // Dual-write en 'eventos_rapidos'
+        const evRef = doc(db, "eventos_rapidos", id);
+        batch.set(
+          evRef,
+          sanitizeForFirestore({
+            id,
+            tipo: "RETARDO_MASIVO",
+            alumno_matricula: item.alumno_matricula,
+            alumno_nombre: item.alumno_nombre,
+            grado_grupo: item.grado_grupo,
+            fecha_hora: item.fecha_hora,
+            motivo: item.motivo,
+            registrado_por: item.registrado_por_nombre,
+          })
+        );
+      });
+
+      await batch.commit();
+      console.log(`[Zentiva Firestore] Lote de ${createdRecords.length} retardos registrado exitosamente.`);
+    } catch (err) {
+      console.error("Error al registrar lote de retardos en Firestore:", err);
+      if (createdRecords.length === 0) {
+        retardosList.forEach((item, index) => {
+          createdRecords.push({
+            id: `ret-${Date.now()}-${index}`,
+            creado_el: now,
+            es_masivo: true,
+            ...item,
+          });
+        });
+      }
+    }
+  } else {
+    retardosList.forEach((item, index) => {
+      createdRecords.push({
+        id: `ret-${Date.now()}-${index}`,
+        creado_el: now,
+        es_masivo: true,
+        ...item,
+      });
+    });
+  }
+
+  const currentRetardos = await getRetardos();
+  const updated = [...createdRecords, ...currentRetardos];
+  setLocal(STORAGE_KEY_RETARDOS, updated);
+
+  return createdRecords;
+}
+
+// ---------------- MÓDULO DE JUSTIFICANTES MÉDICOS (justificantes) ----------------
+const STORAGE_KEY_JUSTIFICANTES = "zentiva_justificantes_v5";
+
+export async function getJustificantes(): Promise<JustificanteMedico[]> {
+  try {
+    if (db && process.env.NEXT_PUBLIC_FIREBASE_API_KEY && process.env.NEXT_PUBLIC_FIREBASE_API_KEY !== "demo-api-key-zentiva") {
+      const snap = await getDocs(collection(db, "justificantes"));
+      if (!snap.empty) {
+        return snap.docs.map((d) => ({ id: d.id, ...d.data() }) as JustificanteMedico);
+      }
+    }
+  } catch (err) {
+    console.warn("Firestore getJustificantes fallback:", err);
+  }
+
+  const cached = getLocal<JustificanteMedico[]>(STORAGE_KEY_JUSTIFICANTES, []);
+  return cached;
+}
+
+export async function addJustificante(
+  justificante: Omit<JustificanteMedico, "id">
+): Promise<JustificanteMedico> {
+  const id = `just-${Date.now()}`;
+  const fullJustificante: JustificanteMedico = sanitizeForFirestore({
+    id,
+    creado_el: new Date().toISOString(),
+    ...justificante,
+  });
+
+  try {
+    if (db && process.env.NEXT_PUBLIC_FIREBASE_API_KEY && process.env.NEXT_PUBLIC_FIREBASE_API_KEY !== "demo-api-key-zentiva") {
+      await setDoc(doc(db, "justificantes", id), fullJustificante);
+      console.log(`[Zentiva Firestore] Justificante médico (${id}) registrado en Firestore.`);
+    }
+  } catch (err) {
+    console.error("Error al guardar justificante médico en Firestore:", err);
+  }
+
+  const list = await getJustificantes();
+  list.unshift(fullJustificante);
+  setLocal(STORAGE_KEY_JUSTIFICANTES, list);
+
+  return fullJustificante;
+}
+
+// ---------------- MÓDULO DE CANALIZACIONES EXTERNAS (canalizaciones) ----------------
+const STORAGE_KEY_CANALIZACIONES = "zentiva_canalizaciones_v5";
+
+export async function getCanalizaciones(): Promise<CanalizacionExterna[]> {
+  try {
+    if (db && process.env.NEXT_PUBLIC_FIREBASE_API_KEY && process.env.NEXT_PUBLIC_FIREBASE_API_KEY !== "demo-api-key-zentiva") {
+      const snap = await getDocs(collection(db, "canalizaciones"));
+      if (!snap.empty) {
+        return snap.docs.map((d) => ({ id: d.id, ...d.data() }) as CanalizacionExterna);
+      }
+    }
+  } catch (err) {
+    console.warn("Firestore getCanalizaciones fallback:", err);
+  }
+
+  const cached = getLocal<CanalizacionExterna[]>(STORAGE_KEY_CANALIZACIONES, []);
+  return cached;
+}
+
+export async function addCanalizacion(
+  canalizacion: Omit<CanalizacionExterna, "id">
+): Promise<CanalizacionExterna> {
+  const id = `canal-${Date.now()}`;
+  const fullCanalizacion: CanalizacionExterna = sanitizeForFirestore({
+    id,
+    creado_el: new Date().toISOString(),
+    ...canalizacion,
+  });
+
+  try {
+    if (db && process.env.NEXT_PUBLIC_FIREBASE_API_KEY && process.env.NEXT_PUBLIC_FIREBASE_API_KEY !== "demo-api-key-zentiva") {
+      await setDoc(doc(db, "canalizaciones", id), fullCanalizacion);
+      console.log(`[Zentiva Firestore] Canalización externa (${id}) registrada en Firestore.`);
+    }
+  } catch (err) {
+    console.error("Error al guardar canalización en Firestore:", err);
+  }
+
+  const list = await getCanalizaciones();
+  list.unshift(fullCanalizacion);
+  setLocal(STORAGE_KEY_CANALIZACIONES, list);
+
+  return fullCanalizacion;
+}
+
+export async function updateCanalizacionEstatus(
+  id: string,
+  nuevoEstatus: EstatusCanalizacion,
+  observaciones?: string
+): Promise<void> {
+  try {
+    if (db && process.env.NEXT_PUBLIC_FIREBASE_API_KEY && process.env.NEXT_PUBLIC_FIREBASE_API_KEY !== "demo-api-key-zentiva") {
+      const docRef = doc(db, "canalizaciones", id);
+      const updatePayload: any = { estatus: nuevoEstatus };
+      if (observaciones !== undefined) {
+        updatePayload.observaciones_seguimiento = observaciones;
+      }
+      await updateDoc(docRef, updatePayload);
+      console.log(`[Zentiva Firestore] Canalización (${id}) actualizada a estatus: ${nuevoEstatus}`);
+    }
+  } catch (err) {
+    console.error("Error al actualizar estatus de canalización en Firestore:", err);
+  }
+
+  const list = await getCanalizaciones();
+  const index = list.findIndex((c) => c.id === id);
+  if (index >= 0) {
+    list[index].estatus = nuevoEstatus;
+    if (observaciones !== undefined) {
+      list[index].observaciones_seguimiento = observaciones;
+    }
+    setLocal(STORAGE_KEY_CANALIZACIONES, list);
+  }
+}
+
+// ---------------- GESTIÓN DE USUARIOS Y ROLES (usuarios) ----------------
+const STORAGE_KEY_USUARIOS = "zentiva_usuarios_v5";
+
+export async function getUsers(): Promise<UserProfile[]> {
+  try {
+    if (db && process.env.NEXT_PUBLIC_FIREBASE_API_KEY && process.env.NEXT_PUBLIC_FIREBASE_API_KEY !== "demo-api-key-zentiva") {
+      const snap = await getDocs(collection(db, "usuarios"));
+      if (!snap.empty) {
+        return snap.docs.map((d) => d.data() as UserProfile);
+      }
+    }
+  } catch (err) {
+    console.warn("Firestore getUsers fallback:", err);
+  }
+
+  const cached = getLocal<UserProfile[]>(STORAGE_KEY_USUARIOS, [
+    {
+      uid: "user-su",
+      email: "admin@zentiva.edu.mx",
+      displayName: "Ing. Carlos Mendoza (SU)",
+      role: "SUPER_USUARIO",
+      cargo: "Administrador de Sistema Escolar",
+      plantel: OFFICIAL_PLANTEL,
+    },
+    {
+      uid: "user-ts",
+      email: "michausrochamariadejesus@gmail.com",
+      displayName: "María de Jesús Michaus Rocha",
+      role: "TRABAJADORA_SOCIAL",
+      cargo: "Trabajadora Social Principal",
+      plantel: OFFICIAL_PLANTEL,
+    },
+    {
+      uid: "user-dir",
+      email: "directivo@zentiva.edu.mx",
+      displayName: "Mtro. Roberto Hernández",
+      role: "DIRECTIVO",
+      cargo: "Director Escolar",
+      plantel: OFFICIAL_PLANTEL,
+    },
+  ]);
+  return cached;
+}
+
+export async function saveUserProfile(profile: UserProfile): Promise<void> {
+  const clean = sanitizeForFirestore(profile);
+  try {
+    if (db && process.env.NEXT_PUBLIC_FIREBASE_API_KEY && process.env.NEXT_PUBLIC_FIREBASE_API_KEY !== "demo-api-key-zentiva") {
+      await setDoc(doc(db, "usuarios", profile.uid), clean, { merge: true });
+      console.log(`[Zentiva Firestore] Perfil de usuario (${profile.email}) guardado en Firestore.`);
+    }
+  } catch (err) {
+    console.error("Error al guardar usuario en Firestore:", err);
+  }
+
+  const users = await getUsers();
+  const index = users.findIndex((u) => u.uid === profile.uid || u.email.toLowerCase() === profile.email.toLowerCase());
+  if (index >= 0) {
+    users[index] = clean;
+  } else {
+    users.unshift(clean);
+  }
+  setLocal(STORAGE_KEY_USUARIOS, users);
+}
+
+export async function deleteUserProfile(uid: string): Promise<void> {
+  try {
+    if (db && process.env.NEXT_PUBLIC_FIREBASE_API_KEY && process.env.NEXT_PUBLIC_FIREBASE_API_KEY !== "demo-api-key-zentiva") {
+      await deleteDoc(doc(db, "usuarios", uid));
+    }
+  } catch (err) {
+    console.error("Error al eliminar usuario en Firestore:", err);
+  }
+
+  const users = await getUsers();
+  const updated = users.filter((u) => u.uid !== uid);
+  setLocal(STORAGE_KEY_USUARIOS, updated);
+}
+
+// ---------------- CATÁLOGO DE COLONIAS (COMPLEMENTO EDIT/DELETE) ----------------
+export async function saveColoniaCatalog(colonia: ColoniaCatalog): Promise<void> {
+  const clean = sanitizeForFirestore(colonia);
+  try {
+    if (db && process.env.NEXT_PUBLIC_FIREBASE_API_KEY && process.env.NEXT_PUBLIC_FIREBASE_API_KEY !== "demo-api-key-zentiva") {
+      await setDoc(doc(db, "cat_colonias", colonia.id), clean, { merge: true });
+    }
+  } catch (err) {
+    console.error("Error al guardar colonia en Firestore:", err);
+  }
+
+  const list = await getColonias();
+  const index = list.findIndex((c) => c.id === colonia.id);
+  if (index >= 0) {
+    list[index] = clean;
+  } else {
+    list.unshift(clean);
+  }
+  setLocal(STORAGE_KEY_COLONIAS, list);
+}
+
+export async function deleteColoniaCatalog(id: string): Promise<void> {
+  try {
+    if (db && process.env.NEXT_PUBLIC_FIREBASE_API_KEY && process.env.NEXT_PUBLIC_FIREBASE_API_KEY !== "demo-api-key-zentiva") {
+      await deleteDoc(doc(db, "cat_colonias", id));
+    }
+  } catch (err) {
+    console.error("Error al eliminar colonia en Firestore:", err);
+  }
+
+  const list = await getColonias();
+  const updated = list.filter((c) => c.id !== id);
+  setLocal(STORAGE_KEY_COLONIAS, updated);
+}
+
+// ---------------- CATÁLOGO DE INSTITUCIONES DE CANALIZACIÓN (cat_instituciones_canalizacion) ----------------
+const STORAGE_KEY_INSTITUCIONES = "zentiva_instituciones_canalizacion_v5";
+
+const INITIAL_INSTITUCIONES: InstitucionCanalizacionCatalog[] = [
+  { id: "inst-1", nombre: "DIF Municipal / Sistema DIF Estatal", tipo: "DIF", telefono: "442-123-4567", activa: true },
+  { id: "inst-2", nombre: "USAER - Unidad de Apoyo a Educ. Regular", tipo: "USAER", telefono: "442-765-4321", activa: true },
+  { id: "inst-3", nombre: "Centro de Salud Mental / CAPSI / CISAME", tipo: "SALUD_MENTAL", telefono: "442-999-8877", activa: true },
+  { id: "inst-4", nombre: "CAPEP - Educ. Preescolar / Psicopedagogía", tipo: "CAPEP", telefono: "442-555-4433", activa: true },
+  { id: "inst-5", nombre: "PANNARTI - Atención a Niñas y Niños", tipo: "PANNARTI", telefono: "442-888-1122", activa: true },
+];
+
+export async function getInstitucionesCanalizacionCatalog(): Promise<InstitucionCanalizacionCatalog[]> {
+  try {
+    if (db && process.env.NEXT_PUBLIC_FIREBASE_API_KEY && process.env.NEXT_PUBLIC_FIREBASE_API_KEY !== "demo-api-key-zentiva") {
+      const snap = await getDocs(collection(db, "cat_instituciones_canalizacion"));
+      if (!snap.empty) {
+        return snap.docs.map((d) => ({ id: d.id, ...d.data() }) as InstitucionCanalizacionCatalog);
+      }
+    }
+  } catch (err) {
+    console.warn("Firestore getInstitucionesCanalizacionCatalog fallback:", err);
+  }
+
+  const cached = getLocal<InstitucionCanalizacionCatalog[]>(STORAGE_KEY_INSTITUCIONES, INITIAL_INSTITUCIONES);
+  if (!localStorage.getItem(STORAGE_KEY_INSTITUCIONES)) {
+    setLocal(STORAGE_KEY_INSTITUCIONES, INITIAL_INSTITUCIONES);
+  }
+  return cached;
+}
+
+export async function saveInstitucionCanalizacionCatalog(
+  inst: InstitucionCanalizacionCatalog
+): Promise<void> {
+  const clean = sanitizeForFirestore(inst);
+  try {
+    if (db && process.env.NEXT_PUBLIC_FIREBASE_API_KEY && process.env.NEXT_PUBLIC_FIREBASE_API_KEY !== "demo-api-key-zentiva") {
+      await setDoc(doc(db, "cat_instituciones_canalizacion", inst.id), clean, { merge: true });
+    }
+  } catch (err) {
+    console.error("Error al guardar institución de canalización en Firestore:", err);
+  }
+
+  const list = await getInstitucionesCanalizacionCatalog();
+  const index = list.findIndex((i) => i.id === inst.id);
+  if (index >= 0) {
+    list[index] = clean;
+  } else {
+    list.unshift(clean);
+  }
+  setLocal(STORAGE_KEY_INSTITUCIONES, list);
+}
+
+export async function deleteInstitucionCanalizacionCatalog(id: string): Promise<void> {
+  try {
+    if (db && process.env.NEXT_PUBLIC_FIREBASE_API_KEY && process.env.NEXT_PUBLIC_FIREBASE_API_KEY !== "demo-api-key-zentiva") {
+      await deleteDoc(doc(db, "cat_instituciones_canalizacion", id));
+    }
+  } catch (err) {
+    console.error("Error al eliminar institución en Firestore:", err);
+  }
+
+  const list = await getInstitucionesCanalizacionCatalog();
+  const updated = list.filter((i) => i.id !== id);
+  setLocal(STORAGE_KEY_INSTITUCIONES, updated);
 }

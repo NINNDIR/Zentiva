@@ -9,6 +9,7 @@ export function middleware(request: NextRequest) {
   const isPublicPath =
     pathname === "/login" ||
     pathname.startsWith("/_next") ||
+    pathname.startsWith("/resources") ||
     pathname.startsWith("/api/public") ||
     pathname === "/favicon.ico";
 
@@ -41,8 +42,10 @@ export const config = {
   matcher: [
     /*
      * Match all request paths except for:
-     * - static files (images, css, js, etc.)
+     * - static files (_next/static, _next/image)
+     * - favicon and assets with common file extensions
+     * - resources directory
      */
-    "/((?!_next/static|_next/image|favicon.ico).*)",
+    "/((?!_next/static|_next/image|resources|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico|css|js)$).*)",
   ],
 };

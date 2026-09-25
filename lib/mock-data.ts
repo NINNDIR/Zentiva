@@ -1,9 +1,9 @@
 import { Alumno, Colonia, NotaConfidencial, EventoTimeline, FaltaCatalog, Incidente, EventoRapido } from "./types";
 
 export const INITIAL_COLONIAS: Colonia[] = [
-  { id: "col_felipe_carrillo_puerto", nombre: "FELIPE CARRILLO PUERTO", codigo_postal: "76138", municipio: "Querétaro" },
-  { id: "col_satelite", nombre: "SATÉLITE", codigo_postal: "76110", municipio: "Querétaro" },
-  { id: "col_centro_historico", nombre: "CENTRO HISTÓRICO", codigo_postal: "76000", municipio: "Querétaro" },
+  { id: "col_felipe_carrillo_puerto", nombre: "FELIPE CARRILLO PUERTO", codigo_postal: "76138", municipio: "Querétaro", activa: true },
+  { id: "col_satelite", nombre: "SATÉLITE", codigo_postal: "76110", municipio: "Querétaro", activa: true },
+  { id: "col_centro_historico", nombre: "CENTRO HISTÓRICO", codigo_postal: "76000", municipio: "Querétaro", activa: true },
 ];
 
 export const INITIAL_ALUMNOS: Alumno[] = [

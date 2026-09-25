@@ -1,0 +1,110 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Helper functions for Role Verification
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function getUserData() {
+      return get(/databases/$(database)/documents/usuarios/$(request.auth.uid)).data;
+    }
+
+    function isSuperUsuario() {
+      return isAuthenticated() && (
+        getUserData().role == 'SUPER_USUARIO' ||
+        request.auth.token.email == 'admin@zentiva.edu.mx'
+      );
+    }
+
+    function isTrabajadoraSocial() {
+      return isAuthenticated() && (
+        getUserData().role == 'TRABAJADORA_SOCIAL' ||
+        isSuperUsuario()
+      );
+    }
+
+    function isDirectivo() {
+      return isAuthenticated();
+    }
+
+    // 1. Colección de Usuarios y Roles
+    match /usuarios/{userId} {
+      allow read: if isAuthenticated();
+      allow write: if isSuperUsuario() || (isAuthenticated() && request.auth.uid == userId);
+    }
+
+    // 2. Colección de Alumnos y Expedientes
+    match /alumnos/{matricula} {
+      allow read: if isAuthenticated();
+      allow create, update, delete: if isTrabajadoraSocial();
+
+      match /notas_confidenciales/{notaId} {
+        allow read, write: if isTrabajadoraSocial();
+      }
+    }
+
+    // 3. Colección de Incidentes Disciplinarios
+    match /incidentes/{incidenteId} {
+      allow read: if isAuthenticated();
+      allow create, update, delete: if isTrabajadoraSocial();
+
+      match /anexos_comentarios/{comentarioId} {
+        allow read: if isAuthenticated();
+        allow create, update: if isTrabajadoraSocial();
+      }
+
+      match /auditoria/{logId} {
+        allow read: if isAuthenticated();
+        allow create: if isTrabajadoraSocial();
+      }
+    }
+
+    // 4. Colección de Control de Retardos
+    match /retardos/{retardoId} {
+      allow read: if isAuthenticated();
+      allow create, update, delete: if isTrabajadoraSocial();
+    }
+
+    // 5. Colección de Salidas Extraordinarias de Menor
+    match /salidas_extraordinarias/{salidaId} {
+      allow read: if isAuthenticated();
+      allow create, update, delete: if isTrabajadoraSocial();
+    }
+
+    // 6. Colección de Justificantes Médicos
+    match /justificantes/{justificantesId} {
+      allow read: if isAuthenticated();
+      allow create, update, delete: if isTrabajadoraSocial();
+    }
+
+    // 7. Colección de Canalizaciones Externas
+    match /canalizaciones/{canalizacionId} {
+      allow read: if isAuthenticated();
+      allow create, update, delete: if isTrabajadoraSocial();
+    }
+
+    // 8. Colección de Eventos Rápidos (Compatibilidad Dashboard)
+    match /eventos_rapidos/{eventoId} {
+      allow read: if isAuthenticated();
+      allow create, update, delete: if isTrabajadoraSocial();
+    }
+
+    // 9. Catálogos Configurables de Sistema
+    match /cat_colonias/{coloniaId} {
+      allow read: if isAuthenticated();
+      allow write: if isTrabajadoraSocial();
+    }
+
+    match /cat_faltas/{faltaId} {
+      allow read: if isAuthenticated();
+      allow write: if isTrabajadoraSocial();
+    }
+
+    match /cat_instituciones_canalizacion/{instId} {
+      allow read: if isAuthenticated();
+      allow write: if isSuperUsuario();
+    }
+  }
+}

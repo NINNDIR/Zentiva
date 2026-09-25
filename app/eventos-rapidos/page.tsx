@@ -4,8 +4,9 @@ import React, { useState, useEffect } from "react";
 import { EventoRapido } from "@/lib/types";
 import { getEventosRapidos } from "@/lib/firestore-service";
 import { PaseSalidaModal } from "@/components/eventos-rapidos/pase-salida-modal";
+import { RetardoModal } from "@/components/eventos-rapidos/retardo-modal";
 import { useAuth } from "@/lib/auth-context";
-import { Clock, LogOut, Search, Filter, CheckSquare } from "lucide-react";
+import { Clock, LogOut, Search, Filter, CheckSquare, Users } from "lucide-react";
 
 export default function EventosRapidosPage() {
   const { user } = useAuth();
@@ -13,7 +14,8 @@ export default function EventosRapidosPage() {
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
   const [tipoFilter, setTipoFilter] = useState<string>("TODOS");
-  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isPaseModalOpen, setIsPaseModalOpen] = useState(false);
+  const [isRetardoModalOpen, setIsRetardoModalOpen] = useState(false);
 
   const loadData = async () => {
     setLoading(true);
@@ -62,13 +64,21 @@ export default function EventosRapidosPage() {
               Pase de Salida & Control de Retardos
             </h1>
             <p className="text-xs text-slate-600 mt-1 font-medium">
-              Registro oficial de retiros anticipados con validación de tutela y resguardo físico de INE.
+              Registro oficial de retiros anticipados e inyección masiva de retardos en expedientes.
             </p>
           </div>
 
           <div className="flex items-center space-x-3">
             <button
-              onClick={() => setIsModalOpen(true)}
+              onClick={() => setIsRetardoModalOpen(true)}
+              className="px-4 py-2.5 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-bold shadow-sm transition flex items-center space-x-2 cursor-pointer"
+            >
+              <Users className="w-4 h-4" />
+              <span>+ Registrar Retardos (Lote / Indiv)</span>
+            </button>
+
+            <button
+              onClick={() => setIsPaseModalOpen(true)}
               className="px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold shadow-sm transition flex items-center space-x-2 cursor-pointer"
             >
               <LogOut className="w-4 h-4" />
@@ -199,11 +209,18 @@ export default function EventosRapidosPage() {
           )}
         </div>
 
-        {/* Pase de Salida Modal */}
+        {/* Modals */}
         <PaseSalidaModal
-          isOpen={isModalOpen}
+          isOpen={isPaseModalOpen}
           currentUser={user}
-          onClose={() => setIsModalOpen(false)}
+          onClose={() => setIsPaseModalOpen(false)}
+          onSaved={loadData}
+        />
+
+        <RetardoModal
+          isOpen={isRetardoModalOpen}
+          currentUser={user}
+          onClose={() => setIsRetardoModalOpen(false)}
           onSaved={loadData}
         />
       </div>

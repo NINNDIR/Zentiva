@@ -8,6 +8,9 @@ module.exports = {
   ],
   theme: {
     extend: {
+      fontFamily: {
+        sans: ["var(--font-inter)", "sans-serif"],
+      },
       colors: {
         background: "var(--background)",
         foreground: "var(--foreground)",
@@ -27,5 +30,13 @@ module.exports = {
       },
     },
   },
+  safelist: [
+    {
+      pattern: /(bg|text|border)-(emerald|blue|amber|rose|slate|purple)-(50|100|200|300|600|700|800|900)/,
+    },
+    {
+      pattern: /bg-(rose|amber|blue|slate)-50\/70/,
+    },
+  ],
   plugins: [],
 };
