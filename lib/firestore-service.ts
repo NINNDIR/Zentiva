@@ -29,9 +29,12 @@ import {
   SalidaExtraordinaria,
   RetardoRecord,
   JustificanteMedico,
+  RegistroAuditoria,
   CanalizacionExterna,
   EstatusCanalizacion,
   InstitucionCanalizacionCatalog,
+  PersonalEscolarCatalog,
+  MateriaCatalog,
 } from "./types";
 import { INITIAL_FALTAS } from "./mock-data";
 
@@ -48,11 +51,28 @@ export function sanitizeForFirestore<T>(data: T): T {
   );
 }
 
+export function reportFirebaseConnectivityIssue(error: unknown): void {
+  if (typeof window === "undefined") return;
+  const code = String((error as { code?: unknown })?.code || "").toLowerCase();
+  if (["unavailable", "deadline-exceeded", "network-request-failed", "resource-exhausted"].some((value) => code.includes(value))) {
+    window.dispatchEvent(new CustomEvent("zentiva:backend-connection", { detail: { available: false } }));
+  }
+}
+
+export function reportFirebaseConnectivityRecovered(): void {
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new CustomEvent("zentiva:backend-connection", { detail: { available: true } }));
+  }
+}
+
 // Session-only cache keys; school records are not persisted across browser tabs.
 const STORAGE_KEY_ALUMNOS = "zentiva_alumnos_v5";
 const STORAGE_KEY_COLONIAS = "zentiva_colonias_v5";
 const STORAGE_KEY_NOTAS = "zentiva_notas_v5";
 const STORAGE_KEY_EVENTS = "zentiva_events_v5";
+const STORAGE_KEY_EVENT_AUDIT = "zentiva_event_audit_v5";
+const STORAGE_KEY_PERSONAL = "zentiva_personal_escolar_v1";
+const STORAGE_KEY_MATERIAS = "zentiva_materias_v1";
 
 const getLocal = <T>(key: string, defaultVal: T): T => {
   if (typeof window === "undefined") return defaultVal;
@@ -214,6 +234,8 @@ export async function deactivateAlumno(matricula: string, nuevoEstatus: "BAJA" |
     }
   } catch (err: any) {
     console.error("Error al dar de baja en Firestore:", err);
+    reportFirebaseConnectivityIssue(err);
+    throw err;
   }
 
   const list = await getAlumnos();
@@ -231,6 +253,8 @@ export async function deleteAlumnoPermanently(matricula: string): Promise<void> 
     }
   } catch (err: any) {
     console.error("Error al eliminar permanentemente en Firestore:", err);
+    reportFirebaseConnectivityIssue(err);
+    throw err;
   }
 
   const list = await getAlumnos();
@@ -580,6 +604,8 @@ export async function getFaltasCatalog(): Promise<FaltaCatalog[]> {
     }
   } catch (err) {
     console.warn("Firestore fetch cat_faltas fallback:", err);
+    reportFirebaseConnectivityIssue(err);
+    throw err;
   }
 
   const cached = getLocal<FaltaCatalog[]>(STORAGE_KEY_FALTAS, INITIAL_FALTAS);
@@ -597,6 +623,8 @@ export async function saveFaltaCatalog(falta: FaltaCatalog): Promise<void> {
     }
   } catch (err) {
     console.error("Error al guardar falta en Firestore:", err);
+    reportFirebaseConnectivityIssue(err);
+    throw err;
   }
 
   const list = await getFaltasCatalog();
@@ -616,6 +644,8 @@ export async function deleteFaltaCatalog(id: string): Promise<void> {
     }
   } catch (err) {
     console.error("Error al eliminar falta en Firestore:", err);
+    reportFirebaseConnectivityIssue(err);
+    throw err;
   }
 
   const list = await getFaltasCatalog();
@@ -636,6 +666,7 @@ export async function getIncidentes(): Promise<Incidente[]> {
     }
   } catch (err) {
     console.error("Firestore fetch incidentes failed:", err);
+    reportFirebaseConnectivityIssue(err);
     throw err;
   }
 
@@ -801,6 +832,8 @@ export async function getAnexosComentarios(incidenteId: string): Promise<AnexoCo
     }
   } catch (err) {
     console.warn("Firestore getAnexosComentarios fallback:", err);
+    reportFirebaseConnectivityIssue(err);
+    throw err;
   }
 
   const map = getLocal<Record<string, AnexoComentario[]>>(STORAGE_KEY_ANEXOS, {});
@@ -817,6 +850,8 @@ export async function addAnexoComentario(comentario: Omit<AnexoComentario, "id">
     }
   } catch (err) {
     console.error("Error al guardar comentario en Firestore:", err);
+    reportFirebaseConnectivityIssue(err);
+    throw err;
   }
 
   const map = getLocal<Record<string, AnexoComentario[]>>(STORAGE_KEY_ANEXOS, {});
@@ -839,6 +874,8 @@ export async function getAuditLogEntries(incidenteId: string): Promise<AuditLogE
     }
   } catch (err) {
     console.warn("Firestore getAuditLogEntries fallback:", err);
+    reportFirebaseConnectivityIssue(err);
+    throw err;
   }
 
   const map = getLocal<Record<string, AuditLogEntry[]>>(STORAGE_KEY_AUDITORIA, {});
@@ -850,6 +887,7 @@ export async function getEventosRapidos(): Promise<EventoRapido[]> {
   try {
     if (db && process.env.NEXT_PUBLIC_FIREBASE_API_KEY && process.env.NEXT_PUBLIC_FIREBASE_API_KEY !== "demo-api-key-zentiva") {
       const snap = await getDocs(collection(db, "eventos_rapidos"));
+      reportFirebaseConnectivityRecovered();
       if (!snap.empty) {
         return snap.docs.map((d) => ({ id: d.id, ...d.data() }) as EventoRapido);
       }
@@ -858,6 +896,7 @@ export async function getEventosRapidos(): Promise<EventoRapido[]> {
     }
   } catch (err) {
     console.error("Firestore getEventosRapidos failed:", err);
+    reportFirebaseConnectivityIssue(err);
     throw err;
   }
 
@@ -874,6 +913,8 @@ export async function addEventoRapido(evento: Omit<EventoRapido, "id">): Promise
     }
   } catch (err) {
     console.error("Error al guardar evento rápido en Firestore:", err);
+    reportFirebaseConnectivityIssue(err);
+    throw err;
   }
 
   const list = await getEventosRapidos();
@@ -890,10 +931,12 @@ export async function getSalidasExtraordinarias(): Promise<SalidaExtraordinaria[
   try {
     if (db && process.env.NEXT_PUBLIC_FIREBASE_API_KEY && process.env.NEXT_PUBLIC_FIREBASE_API_KEY !== "demo-api-key-zentiva") {
       const snap = await getDocs(collection(db, "salidas_extraordinarias"));
+      reportFirebaseConnectivityRecovered();
       return snap.docs.map((d) => ({ id: d.id, ...d.data() }) as SalidaExtraordinaria);
     }
   } catch (err) {
     console.error("Firestore getSalidasExtraordinarias failed:", err);
+    reportFirebaseConnectivityIssue(err);
     throw err;
   }
 
@@ -941,6 +984,7 @@ export async function addSalidaExtraordinaria(
     }
   } catch (err) {
     console.error("Error al guardar salida extraordinaria en Firestore:", err);
+    reportFirebaseConnectivityIssue(err);
     throw err;
   }
 
@@ -948,7 +992,83 @@ export async function addSalidaExtraordinaria(
   list.unshift(fullSalida);
   setLocal(STORAGE_KEY_SALIDAS_EXTRAORDINARIAS, list);
 
+  const eventos = getLocal<EventoRapido[]>(STORAGE_KEY_EVENTOS_RAPIDOS, []);
+  eventos.unshift({
+    id, tipo: "PASE_SALIDA", alumno_matricula: salida.alumno_matricula,
+    alumno_nombre: salida.alumno_nombre, grado_grupo: salida.grado_grupo,
+    fecha_hora: salida.fecha_hora, quien_retira_nombre: salida.quien_retira_nombre,
+    quien_retira_parentesco: salida.quien_retira_parentesco,
+    medio_autorizacion: salida.medio_autorizacion, ine_folio: salida.ine_folio,
+    ine_fisica_resguardada: salida.validacion_ine_fisica_confirmada,
+    motivo: salida.motivo, registrado_por: salida.registrado_por_nombre,
+  });
+  setLocal(STORAGE_KEY_EVENTOS_RAPIDOS, eventos);
+
   return fullSalida;
+}
+
+export async function updateSalidaExtraordinariaWithAudit(
+  id: string,
+  changes: Partial<SalidaExtraordinaria>,
+  usuario: UserProfile
+): Promise<SalidaExtraordinaria> {
+  const list = await getSalidasExtraordinarias();
+  const existing = list.find((item) => item.id === id);
+  if (!existing) throw new Error("No se encontró el pase de salida para editar.");
+
+  const updated = sanitizeForFirestore({ ...existing, ...changes, id: existing.id, creado_el: existing.creado_el });
+  const fields = Object.keys(changes).filter((key) =>
+    JSON.stringify((existing as any)[key]) !== JSON.stringify((updated as any)[key])
+  );
+  if (!fields.length) return existing;
+  const before: Record<string, unknown> = {};
+  const after: Record<string, unknown> = {};
+  fields.forEach((field) => { before[field] = (existing as any)[field]; after[field] = (updated as any)[field]; });
+  const audit: RegistroAuditoria = {
+    id: `audit-${Date.now()}`, registro_id: id, coleccion: "salidas_extraordinarias",
+    fecha_hora: new Date().toISOString(), usuario_id: usuario.uid,
+    usuario_nombre: usuario.displayName, campos_modificados: fields,
+    valor_anterior: before, valor_nuevo: after,
+  };
+
+  if (db && process.env.NEXT_PUBLIC_FIREBASE_API_KEY && process.env.NEXT_PUBLIC_FIREBASE_API_KEY !== "demo-api-key-zentiva") {
+    const batch = writeBatch(db);
+    batch.set(doc(db, "salidas_extraordinarias", id), updated, { merge: true });
+    batch.set(doc(db, "eventos_rapidos", id), {
+      id,
+      tipo: "PASE_SALIDA",
+      alumno_matricula: updated.alumno_matricula,
+      alumno_nombre: updated.alumno_nombre,
+      grado_grupo: updated.grado_grupo,
+      fecha_hora: updated.fecha_hora,
+      quien_retira_nombre: updated.quien_retira_nombre,
+      quien_retira_parentesco: updated.quien_retira_parentesco,
+      medio_autorizacion: updated.medio_autorizacion,
+      ine_folio: updated.ine_folio,
+      ine_fisica_resguardada: updated.validacion_ine_fisica_confirmada,
+      motivo: updated.motivo,
+      registrado_por: updated.registrado_por_nombre,
+    }, { merge: true });
+    batch.set(doc(db, "salidas_extraordinarias", id, "auditoria_cambios", audit.id), audit);
+    try {
+      await batch.commit();
+    } catch (error) {
+      reportFirebaseConnectivityIssue(error);
+      throw error;
+    }
+  }
+
+  setLocal(STORAGE_KEY_SALIDAS_EXTRAORDINARIAS, list.map((item) => item.id === id ? updated : item));
+  const quickEvents = getLocal<EventoRapido[]>(STORAGE_KEY_EVENTOS_RAPIDOS, []);
+  setLocal(STORAGE_KEY_EVENTOS_RAPIDOS, quickEvents.map((event) => event.id !== id ? event : {
+    ...event, fecha_hora: updated.fecha_hora, quien_retira_nombre: updated.quien_retira_nombre,
+    quien_retira_parentesco: updated.quien_retira_parentesco, medio_autorizacion: updated.medio_autorizacion,
+    ine_folio: updated.ine_folio, ine_fisica_resguardada: updated.validacion_ine_fisica_confirmada, motivo: updated.motivo,
+  }));
+  const auditMap = getLocal<Record<string, RegistroAuditoria[]>>(STORAGE_KEY_EVENT_AUDIT, {});
+  auditMap[`salidas_extraordinarias:${id}`] = [audit, ...(auditMap[`salidas_extraordinarias:${id}`] || [])];
+  setLocal(STORAGE_KEY_EVENT_AUDIT, auditMap);
+  return updated;
 }
 
 // ---------------- MÓDULO DE RETARDOS (retardos) ----------------
@@ -958,10 +1078,12 @@ export async function getRetardos(): Promise<RetardoRecord[]> {
   try {
     if (db && process.env.NEXT_PUBLIC_FIREBASE_API_KEY && process.env.NEXT_PUBLIC_FIREBASE_API_KEY !== "demo-api-key-zentiva") {
       const snap = await getDocs(collection(db, "retardos"));
+      reportFirebaseConnectivityRecovered();
       return snap.docs.map((d) => ({ id: d.id, ...d.data() }) as RetardoRecord);
     }
   } catch (err) {
     console.error("Firestore getRetardos failed:", err);
+    reportFirebaseConnectivityIssue(err);
     throw err;
   }
 
@@ -1078,10 +1200,12 @@ export async function getJustificantes(): Promise<JustificanteMedico[]> {
   try {
     if (db && process.env.NEXT_PUBLIC_FIREBASE_API_KEY && process.env.NEXT_PUBLIC_FIREBASE_API_KEY !== "demo-api-key-zentiva") {
       const snap = await getDocs(collection(db, "justificantes"));
+      reportFirebaseConnectivityRecovered();
       return snap.docs.map((d) => ({ id: d.id, ...d.data() }) as JustificanteMedico);
     }
   } catch (err) {
     console.error("Firestore getJustificantes failed:", err);
+    reportFirebaseConnectivityIssue(err);
     throw err;
   }
 
@@ -1106,6 +1230,7 @@ export async function addJustificante(
     }
   } catch (err) {
     console.error("Error al guardar justificante médico en Firestore:", err);
+    reportFirebaseConnectivityIssue(err);
     throw err;
   }
 
@@ -1114,6 +1239,67 @@ export async function addJustificante(
   setLocal(STORAGE_KEY_JUSTIFICANTES, list);
 
   return fullJustificante;
+}
+
+export async function updateJustificanteWithAudit(
+  id: string,
+  changes: Partial<JustificanteMedico>,
+  usuario: UserProfile
+): Promise<JustificanteMedico> {
+  const list = await getJustificantes();
+  const existing = list.find((item) => item.id === id);
+  if (!existing) throw new Error("No se encontró el justificante para editar.");
+
+  const updated = sanitizeForFirestore({ ...existing, ...changes, id: existing.id, folio: existing.folio, creado_el: existing.creado_el });
+  const fields = Object.keys(changes).filter((key) =>
+    JSON.stringify((existing as any)[key]) !== JSON.stringify((updated as any)[key])
+  );
+  if (!fields.length) return existing;
+  const before: Record<string, unknown> = {};
+  const after: Record<string, unknown> = {};
+  fields.forEach((field) => { before[field] = (existing as any)[field]; after[field] = (updated as any)[field]; });
+  const audit: RegistroAuditoria = {
+    id: `audit-${Date.now()}`, registro_id: id, coleccion: "justificantes",
+    fecha_hora: new Date().toISOString(), usuario_id: usuario.uid,
+    usuario_nombre: usuario.displayName, campos_modificados: fields,
+    valor_anterior: before, valor_nuevo: after,
+  };
+
+  if (db && process.env.NEXT_PUBLIC_FIREBASE_API_KEY && process.env.NEXT_PUBLIC_FIREBASE_API_KEY !== "demo-api-key-zentiva") {
+    const batch = writeBatch(db);
+    batch.set(doc(db, "justificantes", id), updated, { merge: true });
+    batch.set(doc(db, "justificantes", id, "auditoria_cambios", audit.id), audit);
+    try {
+      await batch.commit();
+    } catch (error) {
+      reportFirebaseConnectivityIssue(error);
+      throw error;
+    }
+  }
+  setLocal(STORAGE_KEY_JUSTIFICANTES, list.map((item) => item.id === id ? updated : item));
+  const auditMap = getLocal<Record<string, RegistroAuditoria[]>>(STORAGE_KEY_EVENT_AUDIT, {});
+  auditMap[`justificantes:${id}`] = [audit, ...(auditMap[`justificantes:${id}`] || [])];
+  setLocal(STORAGE_KEY_EVENT_AUDIT, auditMap);
+  return updated;
+}
+
+export async function getRegistroAuditoria(
+  coleccionNombre: "salidas_extraordinarias" | "justificantes",
+  id: string
+): Promise<RegistroAuditoria[]> {
+  try {
+    if (db && process.env.NEXT_PUBLIC_FIREBASE_API_KEY && process.env.NEXT_PUBLIC_FIREBASE_API_KEY !== "demo-api-key-zentiva") {
+      const snap = await getDocs(collection(db, coleccionNombre, id, "auditoria_cambios"));
+      return snap.docs
+        .map((item) => ({ id: item.id, ...item.data() }) as RegistroAuditoria)
+        .sort((a, b) => b.fecha_hora.localeCompare(a.fecha_hora));
+    }
+  } catch (err) {
+    console.error(`Could not fetch ${coleccionNombre} audit history:`, err);
+    throw err;
+  }
+  const auditMap = getLocal<Record<string, RegistroAuditoria[]>>(STORAGE_KEY_EVENT_AUDIT, {});
+  return auditMap[`${coleccionNombre}:${id}`] || [];
 }
 
 // ---------------- MÓDULO DE CANALIZACIONES EXTERNAS (canalizaciones) ----------------
@@ -1253,6 +1439,7 @@ export async function saveColoniaCatalog(colonia: ColoniaCatalog): Promise<void>
     }
   } catch (err) {
     console.error("Error al guardar colonia en Firestore:", err);
+    throw err;
   }
 
   const list = await getColonias();
@@ -1265,6 +1452,25 @@ export async function saveColoniaCatalog(colonia: ColoniaCatalog): Promise<void>
   setLocal(STORAGE_KEY_COLONIAS, list);
 }
 
+export async function bulkSaveColoniaCatalog(colonias: ColoniaCatalog[]): Promise<number> {
+  const unique = Array.from(new Map(colonias.map((colonia) => [colonia.id, sanitizeForFirestore(colonia)])).values());
+  if (!unique.length) return 0;
+  if (db && process.env.NEXT_PUBLIC_FIREBASE_API_KEY && process.env.NEXT_PUBLIC_FIREBASE_API_KEY !== "demo-api-key-zentiva") {
+    for (let offset = 0; offset < unique.length; offset += 400) {
+      const batch = writeBatch(db);
+      unique.slice(offset, offset + 400).forEach((colonia) => {
+        batch.set(doc(db, "cat_colonias", colonia.id), colonia, { merge: true });
+      });
+      await batch.commit();
+    }
+  }
+  const current = await getColonias();
+  const byId = new Map(current.map((colonia) => [colonia.id, colonia]));
+  unique.forEach((colonia) => byId.set(colonia.id, colonia));
+  setLocal(STORAGE_KEY_COLONIAS, Array.from(byId.values()));
+  return unique.length;
+}
+
 export async function deleteColoniaCatalog(id: string): Promise<void> {
   try {
     if (db && process.env.NEXT_PUBLIC_FIREBASE_API_KEY && process.env.NEXT_PUBLIC_FIREBASE_API_KEY !== "demo-api-key-zentiva") {
@@ -1272,6 +1478,8 @@ export async function deleteColoniaCatalog(id: string): Promise<void> {
     }
   } catch (err) {
     console.error("Error al eliminar colonia en Firestore:", err);
+    reportFirebaseConnectivityIssue(err);
+    throw err;
   }
 
   const list = await getColonias();
@@ -1300,6 +1508,8 @@ export async function getInstitucionesCanalizacionCatalog(): Promise<Institucion
     }
   } catch (err) {
     console.warn("Firestore getInstitucionesCanalizacionCatalog fallback:", err);
+    reportFirebaseConnectivityIssue(err);
+    throw err;
   }
 
   const cached = getLocal<InstitucionCanalizacionCatalog[]>(STORAGE_KEY_INSTITUCIONES, INITIAL_INSTITUCIONES);
@@ -1319,6 +1529,8 @@ export async function saveInstitucionCanalizacionCatalog(
     }
   } catch (err) {
     console.error("Error al guardar institución de canalización en Firestore:", err);
+    reportFirebaseConnectivityIssue(err);
+    throw err;
   }
 
   const list = await getInstitucionesCanalizacionCatalog();
@@ -1338,9 +1550,59 @@ export async function deleteInstitucionCanalizacionCatalog(id: string): Promise<
     }
   } catch (err) {
     console.error("Error al eliminar institución en Firestore:", err);
+    reportFirebaseConnectivityIssue(err);
+    throw err;
   }
 
   const list = await getInstitucionesCanalizacionCatalog();
   const updated = list.filter((i) => i.id !== id);
   setLocal(STORAGE_KEY_INSTITUCIONES, updated);
+}
+
+export async function getPersonalEscolarCatalog(): Promise<PersonalEscolarCatalog[]> {
+  if (db && process.env.NEXT_PUBLIC_FIREBASE_API_KEY && process.env.NEXT_PUBLIC_FIREBASE_API_KEY !== "demo-api-key-zentiva") {
+    try {
+      const snap = await getDocs(collection(db, "cat_personal_escolar"));
+      return snap.docs.map((item) => ({ id: item.id, ...item.data() }) as PersonalEscolarCatalog);
+    } catch (error) {
+      reportFirebaseConnectivityIssue(error);
+      throw error;
+    }
+  }
+  return getLocal<PersonalEscolarCatalog[]>(STORAGE_KEY_PERSONAL, []);
+}
+
+export async function savePersonalEscolarCatalog(item: PersonalEscolarCatalog): Promise<void> {
+  const clean = sanitizeForFirestore(item);
+  if (db && process.env.NEXT_PUBLIC_FIREBASE_API_KEY && process.env.NEXT_PUBLIC_FIREBASE_API_KEY !== "demo-api-key-zentiva") {
+    await setDoc(doc(db, "cat_personal_escolar", item.id), clean, { merge: true });
+  }
+  const list = await getPersonalEscolarCatalog();
+  const index = list.findIndex((existing) => existing.id === item.id);
+  if (index < 0) list.unshift(clean); else list[index] = clean;
+  setLocal(STORAGE_KEY_PERSONAL, list);
+}
+
+export async function getMateriasCatalog(): Promise<MateriaCatalog[]> {
+  if (db && process.env.NEXT_PUBLIC_FIREBASE_API_KEY && process.env.NEXT_PUBLIC_FIREBASE_API_KEY !== "demo-api-key-zentiva") {
+    try {
+      const snap = await getDocs(collection(db, "cat_materias"));
+      return snap.docs.map((item) => ({ id: item.id, ...item.data() }) as MateriaCatalog);
+    } catch (error) {
+      reportFirebaseConnectivityIssue(error);
+      throw error;
+    }
+  }
+  return getLocal<MateriaCatalog[]>(STORAGE_KEY_MATERIAS, []);
+}
+
+export async function saveMateriaCatalog(item: MateriaCatalog): Promise<void> {
+  const clean = sanitizeForFirestore(item);
+  if (db && process.env.NEXT_PUBLIC_FIREBASE_API_KEY && process.env.NEXT_PUBLIC_FIREBASE_API_KEY !== "demo-api-key-zentiva") {
+    await setDoc(doc(db, "cat_materias", item.id), clean, { merge: true });
+  }
+  const list = await getMateriasCatalog();
+  const index = list.findIndex((existing) => existing.id === item.id);
+  if (index < 0) list.unshift(clean); else list[index] = clean;
+  setLocal(STORAGE_KEY_MATERIAS, list);
 }

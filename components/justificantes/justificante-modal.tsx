@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect } from "react";
 import { Alumno, UserProfile, JustificanteMedico } from "@/lib/types";
-import { subscribeAlumnos, addJustificante } from "@/lib/firestore-service";
+import { subscribeAlumnos, addJustificante, updateJustificanteWithAudit } from "@/lib/firestore-service";
 import {
   X,
   FileCheck,
@@ -20,6 +20,7 @@ interface Props {
   currentUser: UserProfile;
   onClose: () => void;
   onSaved: () => void;
+  initialJustificante?: JustificanteMedico | null;
 }
 
 const INSTITUCIONES_MEDICAS = [
@@ -46,6 +47,7 @@ export const JustificanteModal: React.FC<Props> = ({
   currentUser,
   onClose,
   onSaved,
+  initialJustificante = null,
 }) => {
   const [alumnos, setAlumnos] = useState<Alumno[]>([]);
   const [loadingAlumnos, setLoadingAlumnos] = useState(true);
@@ -55,15 +57,15 @@ export const JustificanteModal: React.FC<Props> = ({
   const [selectedAlumno, setSelectedAlumno] = useState<Alumno | null>(null);
 
   // Form Fields
-  const [folio, setFolio] = useState(() => `JUST-2026-${Math.floor(1000 + Math.random() * 9000)}`);
-  const [fechaEmision, setFechaEmision] = useState(() => new Date().toISOString().split("T")[0]);
-  const [fechaInicio, setFechaInicio] = useState(() => new Date().toISOString().split("T")[0]);
-  const [fechaFin, setFechaFin] = useState(() => new Date().toISOString().split("T")[0]);
+  const [folio, setFolio] = useState(() => initialJustificante?.folio || `JUST-${new Date().getFullYear()}-${Math.floor(1000 + Math.random() * 9000)}`);
+  const [fechaEmision, setFechaEmision] = useState(() => initialJustificante?.fecha_emision || new Date().toISOString().split("T")[0]);
+  const [fechaInicio, setFechaInicio] = useState(() => initialJustificante?.fecha_inicio || new Date().toISOString().split("T")[0]);
+  const [fechaFin, setFechaFin] = useState(() => initialJustificante?.fecha_fin || new Date().toISOString().split("T")[0]);
   const [motivoMedico, setMotivoMedico] = useState(MOTIVOS_MEDICOS_COMUNES[0]);
   const [motivoDetalle, setMotivoDetalle] = useState("");
   const [institucionMedica, setInstitucionMedica] = useState(INSTITUCIONES_MEDICAS[0]);
-  const [medicoNombre, setMedicoNombre] = useState("");
-  const [observaciones, setObservaciones] = useState("");
+  const [medicoNombre, setMedicoNombre] = useState(initialJustificante?.medico_nombre || "");
+  const [observaciones, setObservaciones] = useState(initialJustificante?.observaciones || "");
 
   // Feedback State
   const [saving, setSaving] = useState(false);
@@ -87,17 +89,53 @@ export const JustificanteModal: React.FC<Props> = ({
     }
   }, [isOpen]);
 
+  useEffect(() => {
+    if (!isOpen) return;
+    if (!initialJustificante) {
+      const today = new Date().toISOString().split("T")[0];
+      setSelectedAlumno(null);
+      setSearchQuery("");
+      setFolio(`JUST-${new Date().getFullYear()}-${Math.floor(1000 + Math.random() * 9000)}`);
+      setFechaEmision(today);
+      setFechaInicio(today);
+      setFechaFin(today);
+      setMotivoMedico(MOTIVOS_MEDICOS_COMUNES[0]);
+      setMotivoDetalle("");
+      setInstitucionMedica(INSTITUCIONES_MEDICAS[0]);
+      setMedicoNombre("");
+      setObservaciones("");
+      setError(null);
+      setSuccessMsg(null);
+      return;
+    }
+    setError(null);
+    setSuccessMsg(null);
+    setSelectedAlumno({
+      matricula: initialJustificante.alumno_matricula,
+      nombre_completo: initialJustificante.alumno_nombre,
+      grado: Number(initialJustificante.grado_grupo.match(/\d+/)?.[0] || 1) as Alumno["grado"],
+      grupo: (initialJustificante.grado_grupo.match(/[A-G]/i)?.[0]?.toUpperCase() || "A") as Alumno["grupo"],
+    } as Alumno);
+    setFolio(initialJustificante.folio);
+    setFechaEmision(initialJustificante.fecha_emision);
+    setFechaInicio(initialJustificante.fecha_inicio);
+    setFechaFin(initialJustificante.fecha_fin);
+    setMotivoMedico(MOTIVOS_MEDICOS_COMUNES.includes(initialJustificante.motivo_medico) ? initialJustificante.motivo_medico : "Otro Motivo Médico");
+    setMotivoDetalle(MOTIVOS_MEDICOS_COMUNES.includes(initialJustificante.motivo_medico) ? "" : initialJustificante.motivo_medico);
+    setInstitucionMedica(initialJustificante.institucion_medica || INSTITUCIONES_MEDICAS[0]);
+    setMedicoNombre(initialJustificante.medico_nombre || "");
+    setObservaciones(initialJustificante.observaciones || "");
+  }, [isOpen, initialJustificante]);
+
   if (!isOpen) return null;
 
   // Calculate dynamic days of absence
   const calcularDiasTotales = () => {
-    if (!fechaInicio || !fechaFin) return 1;
-    const start = new Date(fechaInicio);
-    const end = new Date(fechaFin);
-    const diffTime = end.getTime() - start.getTime();
-    if (diffTime < 0) return 1;
-    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)) + 1;
-    return diffDays;
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(fechaInicio) || !/^\d{4}-\d{2}-\d{2}$/.test(fechaFin) || fechaFin < fechaInicio) return 0;
+    const start = Date.parse(`${fechaInicio}T00:00:00Z`);
+    const end = Date.parse(`${fechaFin}T00:00:00Z`);
+    if (!Number.isFinite(start) || !Number.isFinite(end)) return 0;
+    return Math.floor((end - start) / 86_400_000) + 1;
   };
 
   const diasTotales = calcularDiasTotales();
@@ -119,7 +157,7 @@ export const JustificanteModal: React.FC<Props> = ({
       return;
     }
 
-    if (diasTotales <= 0) {
+    if (diasTotales < 1) {
       setError("La fecha de fin debe ser igual o posterior a la fecha de inicio.");
       return;
     }
@@ -146,8 +184,24 @@ export const JustificanteModal: React.FC<Props> = ({
         registrado_por_nombre: currentUser.displayName || "Trabajo Social",
       };
 
-      await addJustificante(payload);
-      setSuccessMsg(`Justificante médico ${folio} guardado exitosamente en Firestore.`);
+      if (initialJustificante) {
+        await updateJustificanteWithAudit(initialJustificante.id, {
+          alumno_matricula: payload.alumno_matricula,
+          alumno_nombre: payload.alumno_nombre,
+          grado_grupo: payload.grado_grupo,
+          fecha_emision: payload.fecha_emision,
+          fecha_inicio: payload.fecha_inicio,
+          fecha_fin: payload.fecha_fin,
+          dias_totales: payload.dias_totales,
+          motivo_medico: payload.motivo_medico,
+          institucion_medica: payload.institucion_medica,
+          medico_nombre: payload.medico_nombre,
+          observaciones: payload.observaciones,
+        }, currentUser);
+      } else {
+        await addJustificante(payload);
+      }
+      setSuccessMsg(`Justificante médico ${folio} ${initialJustificante ? "actualizado" : "guardado"} correctamente.`);
       setTimeout(() => {
         setSuccessMsg(null);
         onSaved();
@@ -172,7 +226,7 @@ export const JustificanteModal: React.FC<Props> = ({
               <FileCheck className="w-5 h-5" />
             </div>
             <div>
-              <h2 className="text-lg font-black tracking-tight">Registro de Justificante Médico</h2>
+              <h2 className="text-lg font-black tracking-tight">{initialJustificante ? "Editar Justificante Médico" : "Registro de Justificante Médico"}</h2>
               <p className="text-xs text-slate-300">
                 Resguardo oficial de inasistencias por salud asociadas al expediente escolar.
               </p>
@@ -214,6 +268,7 @@ export const JustificanteModal: React.FC<Props> = ({
                 type="text"
                 value={folio}
                 onChange={(e) => setFolio(e.target.value)}
+                readOnly={!!initialJustificante}
                 className="w-full text-xs p-2.5 bg-slate-50 border border-slate-300 rounded-xl font-mono font-bold text-slate-900 focus:ring-2 focus:ring-blue-600"
                 required
               />
@@ -327,6 +382,7 @@ export const JustificanteModal: React.FC<Props> = ({
                 <input
                   type="date"
                   value={fechaFin}
+                min={fechaInicio}
                   onChange={(e) => setFechaFin(e.target.value)}
                   className="w-full text-xs p-2.5 bg-white border border-slate-300 rounded-xl font-mono text-slate-900 focus:ring-2 focus:ring-blue-600"
                   required

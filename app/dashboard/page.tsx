@@ -66,9 +66,19 @@ export default function DashboardPage() {
   );
 
   // 2. Reincorporaciones (Alumnos con suspensión activa)
-  const reincorporaciones = incidentes.filter(
-    (inc) => inc.dias_suspension > 0 && inc.reincorporacion_fecha
-  );
+  const reincorporaciones = incidentes.flatMap((inc) => {
+    if (inc.medidas_disciplinarias?.length) {
+      return inc.medidas_disciplinarias
+        .filter((medida) => medida.dias_suspension > 0 && medida.reincorporacion_fecha)
+        .map((medida) => ({ ...inc, id: `${inc.id}-${medida.alumno_matricula}`, alumno_suspendido: medida.alumno_nombre, dias_suspension: medida.dias_suspension, reincorporacion_fecha: medida.reincorporacion_fecha }));
+    }
+    // Legacy incidents are attributed only to named aggressors when a role is available.
+    const aggressors = inc.implicados.filter((implicado) => implicado.rol_implicado === "AGRESOR");
+    const affected = aggressors.length ? aggressors : inc.implicados;
+    return inc.dias_suspension > 0 && inc.reincorporacion_fecha
+      ? affected.map((alumno) => ({ ...inc, id: `${inc.id}-${alumno.alumno_matricula}`, alumno_suspendido: alumno.nombre_completo }))
+      : [];
+  });
 
   // 3. SLAs por vencer (> 24h) o vencidos (> 48h)
   const slasUrgentes = incidentes.filter((inc) => {
@@ -109,10 +119,18 @@ export default function DashboardPage() {
           </div>
 
           {/* Quick Action Buttons */}
-          {user?.role !== "DIRECTIVO" && <div className="flex flex-wrap items-center gap-2.5 w-full md:w-auto">
+          {user?.role !== "DIRECTIVO" && <div className="dashboard-quick-actions flex flex-wrap items-center gap-2 w-full md:w-auto">
+            <Link
+              href="/eventos-rapidos"
+              className="dashboard-quick-action dashboard-quick-retardo px-3 py-2.5 bg-amber-50 hover:bg-amber-100 text-amber-950 border border-amber-200 font-semibold rounded-xl text-xs transition-transform duration-200 flex items-center justify-center gap-2"
+            >
+              <Clock className="w-4 h-4" />
+              <span>+ Registrar Retardo</span>
+            </Link>
+
             <Link
               href="/incidentes/nuevo"
-              className="px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-xl text-sm shadow-sm transition-transform duration-200 hover:scale-[1.01] active:scale-[0.99] flex items-center gap-2"
+              className="dashboard-quick-action dashboard-quick-incidente px-3 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-xl text-xs shadow-sm transition-transform duration-200 flex items-center justify-center gap-2"
             >
               <Plus className="w-4 h-4" />
               <span>+ Nuevo Incidente</span>
@@ -120,7 +138,7 @@ export default function DashboardPage() {
 
             <button
               onClick={() => setIsPaseModalOpen(true)}
-              className="px-4 py-2.5 bg-slate-900 hover:bg-slate-800 text-white font-medium rounded-xl text-sm shadow-sm transition-transform duration-200 hover:scale-[1.01] active:scale-[0.99] flex items-center gap-2 cursor-pointer"
+              className="dashboard-quick-action dashboard-quick-pase px-3 py-2.5 bg-slate-800 hover:bg-slate-900 text-white font-semibold rounded-xl text-xs shadow-sm transition-transform duration-200 flex items-center justify-center gap-2 cursor-pointer"
             >
               <LogOut className="w-4 h-4" />
               <span>+ Pase de Salida</span>
@@ -128,18 +146,10 @@ export default function DashboardPage() {
 
             <Link
               href="/alumnos"
-              className="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-800 font-medium rounded-xl text-sm transition-transform duration-200 hover:scale-[1.01] active:scale-[0.99] flex items-center gap-2"
+              className="dashboard-quick-action dashboard-quick-justificante px-3 py-2.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-950 border border-emerald-200 font-semibold rounded-xl text-xs transition-transform duration-200 flex items-center justify-center gap-2"
             >
               <FileCheck2 className="w-4 h-4" />
               <span>+ Justificante Médico</span>
-            </Link>
-
-            <Link
-              href="/eventos-rapidos"
-              className="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-800 font-medium rounded-xl text-sm transition-transform duration-200 hover:scale-[1.01] active:scale-[0.99] flex items-center gap-2"
-            >
-              <Clock className="w-4 h-4" />
-              <span>+ Registrar Retardo</span>
             </Link>
           </div>}
         </div>
@@ -256,14 +266,12 @@ export default function DashboardPage() {
                       className="p-3 bg-slate-50 border border-slate-200 rounded-lg space-y-1.5"
                     >
                       <div className="flex items-center justify-between">
-                        <span className="text-xs font-bold text-slate-900">
-                          {inc.implicados.map((i) => i.nombre_completo).join(", ")}
-                        </span>
+                        <span className="text-xs font-bold text-slate-900">{inc.alumno_suspendido}</span>
                         <span className="text-[10px] font-bold text-emerald-800 bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 rounded">
                           Regreso: {inc.reincorporacion_fecha}
                         </span>
                       </div>
-                      <p className="text-[11px] text-slate-700">
+                        <p className="text-[11px] text-slate-700">
                         Sanción: <span className="font-semibold">{inc.dias_suspension} días hábiles</span>
                       </p>
                       <p className="text-[10px] text-slate-500 line-clamp-1">

@@ -236,17 +236,25 @@ export default function IncidenteDetailPage() {
 
               {/* Sanctions & Dates Grid */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 bg-slate-50 p-4 rounded-lg border border-slate-300 text-xs">
-                <div>
-                  <span className="text-slate-600 font-medium block text-[11px]">Días de Suspensión:</span>
-                  <span className="font-bold text-slate-900 text-sm font-mono">{incidente.dias_suspension} días</span>
-                </div>
-
-                <div>
-                  <span className="text-slate-600 font-medium block text-[11px]">Fecha Reincorporación (Día Hábil):</span>
-                  <span className="font-bold text-rose-800 text-sm font-mono">
-                    {incidente.reincorporacion_fecha || "N/A"}
-                  </span>
-                </div>
+                {incidente.medidas_disciplinarias?.length ? <div className="sm:col-span-2">
+                  <span className="mb-2 block text-[11px] font-bold uppercase text-slate-600">Medidas por alumno implicado como agresor</span>
+                  <div className="space-y-2">
+                    {incidente.medidas_disciplinarias.map((medida) => <div key={medida.alumno_matricula} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-200 bg-white p-3">
+                      <span className="font-semibold text-slate-800">{medida.alumno_nombre} <span className="font-mono text-slate-500">({medida.alumno_matricula})</span></span>
+                      <span className="font-mono font-bold text-slate-900">{medida.dias_suspension} días</span>
+                      <span className="font-mono text-rose-800">{medida.reincorporacion_fecha ? `Regresa ${medida.reincorporacion_fecha}` : "Sin suspensión"}</span>
+                    </div>)}
+                  </div>
+                </div> : <>
+                  <div>
+                    <span className="text-slate-600 font-medium block text-[11px]">Días de Suspensión:</span>
+                    <span className="font-bold text-slate-900 text-sm font-mono">{incidente.dias_suspension} días</span>
+                  </div>
+                  <div>
+                    <span className="text-slate-600 font-medium block text-[11px]">Fecha Reincorporación (Día Hábil):</span>
+                    <span className="font-bold text-rose-800 text-sm font-mono">{incidente.reincorporacion_fecha || "N/A"}</span>
+                  </div>
+                </>}
 
                 <div>
                   <span className="text-slate-600 font-medium block text-[11px]">Citatorio a Tutores:</span>

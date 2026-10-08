@@ -1,14 +1,21 @@
 # Dependencias
 /node_modules
 
-# Entornos y Secretos (¡Crítico para Firebase!)
-.env
-.env.local
-.env*.local
-*-firebase-admin.json
-firebase-adminsdk-*.json
-service-account*.json
+# Entornos y secretos (¡Crítico para Firebase!)
+.env*
+!.env.example
+!.env.*.example
+*firebase-admin*.json
+*firebase-adminsdk*.json
+*service-account*.json
+*serviceaccount*.json
 serviceAccountKey*.json
+*.pem
+*.key
+
+# Configuración local de herramientas y despliegue
+.firebase/
+.vercel/
 
 # Build de Next.js
 /.next/

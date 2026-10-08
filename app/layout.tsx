@@ -23,7 +23,7 @@ export default function RootLayout({
         <AuthProvider>
           <NetworkStatusBanner />
           <Navbar />
-          {children}
+          <div className="app-content">{children}</div>
         </AuthProvider>
       </body>
     </html>

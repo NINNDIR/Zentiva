@@ -1,6 +1,7 @@
 const { applicationDefault, cert, getApps, initializeApp } = require("firebase-admin/app");
 const { getAuth } = require("firebase-admin/auth");
 const { getFirestore } = require("firebase-admin/firestore");
+require("@next/env").loadEnvConfig(process.cwd());
 
 const [emailArg, roleArg] = process.argv.slice(2);
 const roles = new Set(["SUPER_USUARIO", "TRABAJADORA_SOCIAL", "DIRECTIVO"]);

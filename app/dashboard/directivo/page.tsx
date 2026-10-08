@@ -86,7 +86,10 @@ export default function DirectivoDashboardPage() {
       };
 
       current.total_incidentes += 1;
-      current.dias_suspension_acumulados += inc.dias_suspension || 0;
+      const medida = inc.medidas_disciplinarias?.find((item) => item.alumno_matricula === imp.alumno_matricula);
+      if (imp.rol_implicado === "AGRESOR") {
+        current.dias_suspension_acumulados += medida?.dias_suspension ?? (inc.medidas_disciplinarias?.length ? 0 : inc.dias_suspension || 0);
+      }
 
       if (inc.severidad === "LEVE") current.leves += 1;
       else if (inc.severidad === "MODERADA") current.moderadas += 1;

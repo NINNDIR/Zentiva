@@ -150,7 +150,7 @@ export const AlumnoFormView: React.FC<Props> = ({
         <div className="flex items-center justify-between border-b pb-1">
           <h3 className="font-bold text-slate-900 text-xs font-mono flex items-center gap-1.5 text-cyan-800">
             <Phone className="w-4 h-4 text-cyan-600" />
-            DIRECTORIO OFICIAL DE 3 CONTACTOS Y DATOS DE TRABAJO
+            DIRECTORIO DE 3 CONTACTOS AUTORIZADOS PARA RECOGER
           </h3>
           <span className="text-[10px] font-mono text-slate-500">Expediente Completo (3/3 Slots)</span>
         </div>
@@ -184,7 +184,7 @@ export const AlumnoFormView: React.FC<Props> = ({
               hasData: !!alumno.contactos_oficiales.find((c) => c.prioridad === 2)?.nombre,
             },
             {
-              slotTitle: "3. CONTACTO DE EMERGENCIA",
+              slotTitle: "3. CONTACTO AUTORIZADO",
               badgeBg: "bg-slate-800 text-slate-200",
               cardBg: "bg-slate-50 border-slate-200",
               data: alumno.contactos_oficiales.find((c) => c.prioridad === 3) || {

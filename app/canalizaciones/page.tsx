@@ -24,6 +24,8 @@ export default function CanalizacionesPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [estatusFilter, setEstatusFilter] = useState<string>("TODOS");
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [followUpDrafts, setFollowUpDrafts] = useState<Record<string, string>>({});
+  const [followUpFeedback, setFollowUpFeedback] = useState("");
 
   const loadData = async () => {
     setLoading(true);
@@ -49,6 +51,18 @@ export default function CanalizacionesPage() {
       await loadData();
     } catch (err) {
       console.error("Error al actualizar estatus de canalización:", err);
+      setFollowUpFeedback("No se pudo actualizar el estatus de la canalización. Comprueba la conexión y tus permisos.");
+    }
+  };
+
+  const handleFollowUpSave = async (item: CanalizacionExterna) => {
+    setFollowUpFeedback("");
+    try {
+      await updateCanalizacionEstatus(item.id, item.estatus, followUpDrafts[item.id] ?? item.observaciones_seguimiento ?? "");
+      setFollowUpFeedback(`Seguimiento actualizado para ${item.folio}.`);
+      await loadData();
+    } catch {
+      setFollowUpFeedback("No se pudo guardar la nota de seguimiento. Comprueba la conexión y tus permisos.");
     }
   };
 
@@ -182,6 +196,7 @@ export default function CanalizacionesPage() {
             </select>
           </div>
         </div>
+        {followUpFeedback && <p role="status" className={`rounded-lg border px-3 py-2 text-xs font-semibold ${followUpFeedback.startsWith("No se pudo") ? "border-rose-200 bg-rose-50 text-rose-800" : "border-emerald-200 bg-emerald-50 text-emerald-800"}`}>{followUpFeedback}</p>}
 
         {/* Data Table */}
         <div className="bg-white rounded-xl border border-slate-300 shadow-sm overflow-hidden">
@@ -223,8 +238,19 @@ export default function CanalizacionesPage() {
                           {c.institucion_destino}
                         </span>
                       </td>
-                      <td className="py-4 px-5 max-w-xs truncate text-slate-700 font-medium">
+                      <td className="py-4 px-5 max-w-xs text-slate-700 font-medium">
                         {c.motivo_canalizacion}
+                        {user.role !== "DIRECTIVO" && <div className="mt-2 min-w-56 space-y-1.5">
+                          <textarea
+                            rows={2}
+                            value={followUpDrafts[c.id] ?? c.observaciones_seguimiento ?? ""}
+                            onChange={(event) => setFollowUpDrafts((current) => ({ ...current, [c.id]: event.target.value }))}
+                            placeholder="Registrar contacto, cita o acuerdo de seguimiento…"
+                            className="w-full resize-y rounded-lg border border-slate-200 bg-white p-2 text-[11px] font-normal"
+                          />
+                          <button type="button" onClick={() => handleFollowUpSave(c)} className="rounded-md bg-slate-800 px-2.5 py-1 text-[10px] font-bold text-white hover:bg-slate-700">Guardar seguimiento</button>
+                        </div>}
+                        {user.role === "DIRECTIVO" && c.observaciones_seguimiento && <p className="mt-1 whitespace-normal text-[10px] font-normal text-slate-500">Seguimiento: {c.observaciones_seguimiento}</p>}
                       </td>
                       <td className="py-4 px-5 text-center">
                         <select

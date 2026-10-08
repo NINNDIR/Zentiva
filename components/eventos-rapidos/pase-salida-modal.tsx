@@ -1,8 +1,8 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
-import { Alumno, UserProfile, ContactoOficial } from "@/lib/types";
-import { subscribeAlumnos, addSalidaExtraordinaria } from "@/lib/firestore-service";
+import { Alumno, UserProfile, ContactoOficial, SalidaExtraordinaria } from "@/lib/types";
+import { subscribeAlumnos, addSalidaExtraordinaria, updateSalidaExtraordinariaWithAudit } from "@/lib/firestore-service";
 import {
   LogOut,
   X,
@@ -23,6 +23,7 @@ interface PaseSalidaModalProps {
   currentUser: UserProfile;
   onClose: () => void;
   onSaved: () => void;
+  initialSalida?: SalidaExtraordinaria | null;
 }
 
 export const PaseSalidaModal: React.FC<PaseSalidaModalProps> = ({
@@ -30,25 +31,42 @@ export const PaseSalidaModal: React.FC<PaseSalidaModalProps> = ({
   currentUser,
   onClose,
   onSaved,
+  initialSalida = null,
 }) => {
   const [alumnos, setAlumnos] = useState<Alumno[]>([]);
-  const [selectedMatricula, setSelectedMatricula] = useState("");
+  const [selectedMatricula, setSelectedMatricula] = useState(initialSalida?.alumno_matricula || "");
   const [searchQuery, setSearchQuery] = useState("");
 
   // Visitor Selection State
-  const [tipoVisitante, setTipoVisitante] = useState<"CONTACTO_REGISTRADO" | "CUARTO_VISITANTE">("CONTACTO_REGISTRADO");
-  const [selectedContactoId, setSelectedContactoId] = useState<string>("");
+  const [tipoVisitante, setTipoVisitante] = useState<"CONTACTO_REGISTRADO" | "CUARTO_VISITANTE">(initialSalida?.tipo_visitante || "CONTACTO_REGISTRADO");
+  const [selectedContactoId, setSelectedContactoId] = useState<string>(initialSalida?.contacto_oficial_id || "");
 
   // Visitor Details State
-  const [quienRetiraNombre, setQuienRetiraNombre] = useState("");
-  const [quienRetiraParentesco, setQuienRetiraParentesco] = useState("Madre");
-  const [ineFolio, setIneFolio] = useState("");
+  const [quienRetiraNombre, setQuienRetiraNombre] = useState(initialSalida?.quien_retira_nombre || "");
+  const [quienRetiraParentesco, setQuienRetiraParentesco] = useState(initialSalida?.quien_retira_parentesco || "Madre");
+  const [ineFolio, setIneFolio] = useState(initialSalida?.ine_folio || "");
 
   // Other Details
-  const [medioAutorizacion, setMedioAutorizacion] = useState("Validación Telefónica y Presencial con INE en Físico");
-  const [motivo, setMotivo] = useState("");
-  const [validacionIneFisicaConfirmada, setValidacionIneFisicaConfirmada] = useState(false);
+  const [medioAutorizacion, setMedioAutorizacion] = useState(initialSalida?.medio_autorizacion || "Validación Telefónica y Presencial con INE en Físico");
+  const [motivo, setMotivo] = useState(initialSalida?.motivo || "");
+  const [validacionIneFisicaConfirmada, setValidacionIneFisicaConfirmada] = useState(initialSalida?.validacion_ine_fisica_confirmada || false);
+  const [fechaHora, setFechaHora] = useState(initialSalida?.fecha_hora || "");
   const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    if (!isOpen) return;
+    setSelectedMatricula(initialSalida?.alumno_matricula || "");
+    setTipoVisitante(initialSalida?.tipo_visitante || "CONTACTO_REGISTRADO");
+    setSelectedContactoId(initialSalida?.contacto_oficial_id || "");
+    setQuienRetiraNombre(initialSalida?.quien_retira_nombre || "");
+    setQuienRetiraParentesco(initialSalida?.quien_retira_parentesco || "Madre");
+    setIneFolio(initialSalida?.ine_folio || "");
+    setMedioAutorizacion(initialSalida?.medio_autorizacion || "Validación Telefónica y Presencial con INE en Físico");
+    setMotivo(initialSalida?.motivo || "");
+    setValidacionIneFisicaConfirmada(initialSalida?.validacion_ine_fisica_confirmada || false);
+    setFechaHora(initialSalida?.fecha_hora || "");
+  }, [isOpen, initialSalida]);
 
   useEffect(() => {
     if (isOpen) {
@@ -109,6 +127,7 @@ export const PaseSalidaModal: React.FC<PaseSalidaModalProps> = ({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setError("");
     if (!selectedAlumno) {
       alert("Por favor selecciona un alumno.");
       return;
@@ -132,9 +151,8 @@ export const PaseSalidaModal: React.FC<PaseSalidaModalProps> = ({
     setSubmitting(true);
     try {
       const now = new Date();
-      const fechaHoraStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")} ${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
-
-      await addSalidaExtraordinaria({
+      const fechaHoraStr = fechaHora || `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")} ${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
+      const payload = {
         alumno_matricula: selectedAlumno.matricula,
         alumno_nombre: selectedAlumno.nombre_completo,
         grado_grupo: `${selectedAlumno.grado}° "${selectedAlumno.grupo}"`,
@@ -149,13 +167,18 @@ export const PaseSalidaModal: React.FC<PaseSalidaModalProps> = ({
         validacion_ine_fisica_confirmada: validacionIneFisicaConfirmada,
         registrado_por_uid: currentUser.uid,
         registrado_por_nombre: currentUser.displayName,
-      });
+      };
+      if (initialSalida) {
+        await updateSalidaExtraordinariaWithAudit(initialSalida.id, payload, currentUser);
+      } else {
+        await addSalidaExtraordinaria(payload);
+      }
 
       onSaved();
       onClose();
     } catch (err) {
       console.error("Error al registrar salida extraordinaria:", err);
-      alert("Ocurrió un error al guardar la salida extraordinaria en Firestore.");
+      setError("No se pudo guardar el pase. Comprueba tu conexión y vuelve a intentarlo; el registro no se confirmó.");
     } finally {
       setSubmitting(false);
     }
@@ -173,7 +196,7 @@ export const PaseSalidaModal: React.FC<PaseSalidaModalProps> = ({
             </div>
             <div>
               <h3 className="font-extrabold text-base tracking-wide flex items-center gap-2">
-                <span>MÓDULO DE SALIDA EXTRAORDINARIA DE MENOR</span>
+                <span>{initialSalida ? "EDITAR PASE DE SALIDA" : "MÓDULO DE SALIDA EXTRAORDINARIA DE MENOR"}</span>
                 <span className="bg-cyan-500/20 text-cyan-300 text-[10px] font-mono px-2 py-0.5 rounded border border-cyan-400/30">
                   FIRESTORE EN VIVO
                 </span>
@@ -193,6 +216,7 @@ export const PaseSalidaModal: React.FC<PaseSalidaModalProps> = ({
         </div>
 
         {/* Body Form */}
+        {error && <p role="alert" className="mx-6 mt-4 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2.5 text-xs font-semibold text-rose-800">{error}</p>}
         <form onSubmit={handleSubmit} className="p-6 overflow-y-auto space-y-6 flex-1">
           
           {/* Step 1: Buscador y Selección de Alumno */}
@@ -217,6 +241,7 @@ export const PaseSalidaModal: React.FC<PaseSalidaModalProps> = ({
               value={selectedMatricula}
               onChange={(e) => handleSelectAlumno(e.target.value)}
               required
+              disabled={!!initialSalida}
               className="w-full text-xs p-2.5 bg-white border border-slate-300 rounded-lg focus:ring-2 focus:ring-cyan-500 font-mono font-bold text-slate-900"
             >
               <option value="">-- Seleccionar alumno de la lista ({filteredAlumnos.length}) --</option>
@@ -399,6 +424,10 @@ export const PaseSalidaModal: React.FC<PaseSalidaModalProps> = ({
           {selectedAlumno && (
             <div className="space-y-4 border-t border-slate-200 pt-4">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {initialSalida && <div>
+                  <label className="text-xs font-bold text-slate-700 uppercase block mb-1">Fecha y hora del pase</label>
+                  <input type="datetime-local" required value={fechaHora.replace(" ", "T")} onChange={(e) => setFechaHora(e.target.value.replace("T", " "))} className="w-full text-xs p-2.5 bg-white border border-slate-300 rounded-lg font-mono" />
+                </div>}
                 <div>
                   <label className="text-xs font-bold text-slate-700 uppercase block mb-1">Medio de Autorización</label>
                   <select
@@ -489,7 +518,7 @@ export const PaseSalidaModal: React.FC<PaseSalidaModalProps> = ({
             className="px-5 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-lg text-xs font-bold shadow transition disabled:opacity-50 flex items-center space-x-2"
           >
             <FileText className="w-4 h-4 text-cyan-400" />
-            <span>{submitting ? "Guardando en Firestore..." : "Emitir Pase y Registrar en Firestore"}</span>
+            <span>{submitting ? "Guardando cambios..." : initialSalida ? "Guardar Cambios" : "Emitir Pase y Registrar en Firestore"}</span>
           </button>
         </div>
 

@@ -51,11 +51,35 @@ export const Navbar: React.FC = () => {
       : <Sparkles className="h-3.5 w-3.5 text-cyan-700" />;
 
   return (
-    <header className="sticky top-0 z-50 border-b border-slate-200/80 bg-white/85 text-slate-900 shadow-sm backdrop-blur-xl">
-      <div className="mx-auto flex h-[4.25rem] max-w-[1440px] items-center justify-between gap-4 px-4 sm:px-6 lg:px-8">
+    <header className="app-sidebar sticky top-0 z-50 border-b border-slate-200/80 bg-white/85 text-slate-900 shadow-sm backdrop-blur-xl">
+      <div className="app-sidebar-head mx-auto flex h-[4.25rem] max-w-[1440px] items-center justify-between gap-4 px-4 sm:px-6 lg:px-8">
         <Link href={dashboardHref} aria-label="Zentiva, ir al inicio" className="shrink-0 transition-opacity hover:opacity-80">
           <Logo size="md" variant="light" />
         </Link>
+
+        <nav aria-label="Navegación principal" className="app-main-nav flex min-w-0 flex-1 items-center gap-1 overflow-x-auto">
+          {navItems.map((item) => {
+            const Icon = item.icon;
+            const isActive = item.href === "/dashboard"
+              ? pathname === item.href
+              : pathname === item.href || pathname.startsWith(`${item.href}/`);
+            return (
+              <Link
+                key={item.href}
+                href={item.href}
+                aria-current={isActive ? "page" : undefined}
+                className={`app-nav-link flex min-h-9 shrink-0 items-center gap-2 rounded-xl px-3 text-xs font-medium transition-colors ${
+                  isActive
+                    ? "bg-blue-50 text-blue-700"
+                    : "text-slate-600 hover:bg-slate-100 hover:text-slate-900"
+                }`}
+              >
+                <Icon className="h-4 w-4" />
+                <span>{item.label}</span>
+              </Link>
+            );
+          })}
+        </nav>
 
         <div className="flex min-w-0 items-center gap-2 sm:gap-3">
           <div className="hidden items-center gap-1.5 rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-medium text-slate-700 md:flex">
@@ -82,29 +106,6 @@ export const Navbar: React.FC = () => {
         </div>
       </div>
 
-      <nav aria-label="Navegación principal" className="app-main-nav mx-auto flex max-w-[1440px] gap-1 overflow-x-auto px-3 pb-2 sm:px-6 lg:px-8">
-        {navItems.map((item) => {
-          const Icon = item.icon;
-          const isActive = item.href === "/dashboard"
-            ? pathname === item.href
-            : pathname === item.href || pathname.startsWith(`${item.href}/`);
-          return (
-            <Link
-              key={item.href}
-              href={item.href}
-              aria-current={isActive ? "page" : undefined}
-              className={`flex min-h-9 shrink-0 items-center gap-2 rounded-xl px-3 text-xs font-medium transition-colors ${
-                isActive
-                  ? "bg-blue-50 text-blue-700"
-                  : "text-slate-600 hover:bg-slate-100 hover:text-slate-900"
-              }`}
-            >
-              <Icon className="h-4 w-4" />
-              <span>{item.label}</span>
-            </Link>
-          );
-        })}
-      </nav>
     </header>
   );
 };

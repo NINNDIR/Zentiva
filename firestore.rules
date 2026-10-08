@@ -22,7 +22,8 @@ service cloud.firestore {
       allow read: if canReadSchoolData();
       allow create, update, delete: if isTrabajadoraSocial();
       match /notas_confidenciales/{notaId} {
-        allow read: if canReadSchoolData();
+        // Confidential social-work notes are limited to Social Work and system admins.
+        allow read: if isTrabajadoraSocial();
         allow create: if isTrabajadoraSocial();
         allow update, delete: if false;
       }
@@ -32,7 +33,11 @@ service cloud.firestore {
       allow read: if canReadSchoolData();
       allow create: if isTrabajadoraSocial();
       // Once closed, the ticket itself is immutable. Corrections belong in comments.
-      allow update: if isTrabajadoraSocial() && resource.data.estatus != 'CERRADO';
+      allow update: if isTrabajadoraSocial() && (
+        resource.data.estatus != 'CERRADO'
+        || (request.resource.data.estatus == 'EN PROCESO'
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['estatus']))
+      );
       allow delete: if false;
 
       match /comentarios/{comentarioId} {
@@ -64,17 +69,46 @@ service cloud.firestore {
     match /eventos_rapidos/{eventoId} {
       allow read: if canReadSchoolData();
       allow create: if isTrabajadoraSocial();
-      allow update, delete: if false;
+      // Only the mirrored projection of an exit pass may change; retardo logs stay immutable.
+      allow update: if isTrabajadoraSocial()
+        && resource.data.tipo == 'PASE_SALIDA'
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'fecha_hora', 'quien_retira_nombre', 'quien_retira_parentesco',
+          'medio_autorizacion', 'ine_folio', 'ine_fisica_resguardada', 'motivo'
+        ]);
+      allow delete: if false;
     }
     match /salidas_extraordinarias/{salidaId} {
       allow read: if canReadSchoolData();
       allow create: if isTrabajadoraSocial();
-      allow update, delete: if false;
+      allow update: if isTrabajadoraSocial()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'fecha_hora', 'tipo_visitante', 'contacto_oficial_id', 'quien_retira_nombre',
+          'quien_retira_parentesco', 'ine_folio', 'medio_autorizacion', 'motivo',
+          'validacion_ine_fisica_confirmada'
+        ]);
+      allow delete: if false;
+      match /auditoria_cambios/{logId} {
+        allow read: if canReadSchoolData();
+        allow create: if isTrabajadoraSocial();
+        allow update, delete: if false;
+      }
     }
     match /justificantes/{justificanteId} {
       allow read: if canReadSchoolData();
       allow create: if isTrabajadoraSocial();
-      allow update, delete: if false;
+      allow update: if isTrabajadoraSocial()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'alumno_matricula', 'alumno_nombre', 'grado_grupo', 'fecha_emision',
+          'fecha_inicio', 'fecha_fin', 'dias_totales', 'motivo_medico',
+          'institucion_medica', 'medico_nombre', 'observaciones'
+        ]);
+      allow delete: if false;
+      match /auditoria_cambios/{logId} {
+        allow read: if canReadSchoolData();
+        allow create: if isTrabajadoraSocial();
+        allow update, delete: if false;
+      }
     }
     match /canalizaciones/{canalizacionId} {
       allow read: if canReadSchoolData();
@@ -87,9 +121,10 @@ service cloud.firestore {
 
     match /cat_colonias/{coloniaId} {
       allow read: if canReadSchoolData();
-      allow create: if isTrabajadoraSocial()
-        && request.resource.data.pendiente_revision == true
-        && request.resource.data.creada_por_usuario == true;
+      allow create: if isSuperUsuario()
+        || (isTrabajadoraSocial()
+          && request.resource.data.pendiente_revision == true
+          && request.resource.data.creada_por_usuario == true);
       allow update, delete: if isSuperUsuario();
     }
     match /cat_faltas/{faltaId} {
@@ -97,6 +132,14 @@ service cloud.firestore {
       allow write: if isSuperUsuario();
     }
     match /cat_instituciones_canalizacion/{instId} {
+      allow read: if canReadSchoolData();
+      allow write: if isSuperUsuario();
+    }
+    match /cat_personal_escolar/{personaId} {
+      allow read: if canReadSchoolData();
+      allow write: if isSuperUsuario();
+    }
+    match /cat_materias/{materiaId} {
       allow read: if canReadSchoolData();
       allow write: if isSuperUsuario();
     }

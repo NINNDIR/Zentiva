@@ -1,27 +1,32 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
-import { EventoRapido } from "@/lib/types";
-import { getEventosRapidos } from "@/lib/firestore-service";
+import { EventoRapido, SalidaExtraordinaria } from "@/lib/types";
+import { getEventosRapidos, getSalidasExtraordinarias } from "@/lib/firestore-service";
 import { PaseSalidaModal } from "@/components/eventos-rapidos/pase-salida-modal";
 import { RetardoModal } from "@/components/eventos-rapidos/retardo-modal";
 import { useAuth } from "@/lib/auth-context";
-import { Clock, LogOut, Search, Filter, CheckSquare, Users } from "lucide-react";
+import { Clock, LogOut, Search, Filter, CheckSquare, Users, Pencil, History } from "lucide-react";
+import { RegistroAuditoriaModal } from "@/components/registro-auditoria-modal";
 
 export default function EventosRapidosPage() {
   const { user } = useAuth();
   const [eventos, setEventos] = useState<EventoRapido[]>([]);
+  const [salidas, setSalidas] = useState<SalidaExtraordinaria[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
   const [tipoFilter, setTipoFilter] = useState<string>("TODOS");
   const [isPaseModalOpen, setIsPaseModalOpen] = useState(false);
   const [isRetardoModalOpen, setIsRetardoModalOpen] = useState(false);
+  const [editingSalida, setEditingSalida] = useState<SalidaExtraordinaria | null>(null);
+  const [historyId, setHistoryId] = useState("");
 
   const loadData = async () => {
     setLoading(true);
     try {
-      const data = await getEventosRapidos();
+      const [data, salidasData] = await Promise.all([getEventosRapidos(), getSalidasExtraordinarias()]);
       setEventos(data);
+      setSalidas(salidasData);
     } catch (err) {
       console.error("Error al cargar eventos rápidos:", err);
     } finally {
@@ -158,6 +163,7 @@ export default function EventosRapidosPage() {
                     <th className="py-3 px-5">Medio Autorización</th>
                     <th className="py-3 px-5 text-center">INE Resguardada</th>
                     <th className="py-3 px-5 text-right">Registrado Por</th>
+                    <th className="py-3 px-5 text-right">Acciones</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
@@ -203,6 +209,23 @@ export default function EventosRapidosPage() {
                       <td className="py-4 px-5 text-right text-slate-700 font-semibold">
                         {ev.registrado_por}
                       </td>
+                      <td className="py-4 px-5">
+                        <div className="flex items-center justify-end gap-1">
+                          {ev.tipo === "PASE_SALIDA" && salidas.some((salida) => salida.id === ev.id) && user.role !== "DIRECTIVO" && (
+                            <button type="button" onClick={() => {
+                              const salida = salidas.find((item) => item.id === ev.id);
+                              if (salida) { setEditingSalida(salida); setIsPaseModalOpen(true); }
+                            }} className="inline-flex items-center gap-1 rounded-lg px-2 py-1.5 text-[11px] font-semibold text-blue-700 hover:bg-blue-50" title="Editar pase">
+                              <Pencil className="h-3.5 w-3.5" /> Editar
+                            </button>
+                          )}
+                          {(ev.tipo === "PASE_SALIDA" && salidas.some((salida) => salida.id === ev.id)) && (
+                            <button type="button" onClick={() => setHistoryId(ev.id)} className="rounded-lg p-1.5 text-slate-500 hover:bg-slate-100" title="Ver historial de cambios" aria-label="Ver historial de cambios">
+                              <History className="h-4 w-4" />
+                            </button>
+                          )}
+                        </div>
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -215,9 +238,12 @@ export default function EventosRapidosPage() {
         {!isDirectivo && <PaseSalidaModal
           isOpen={isPaseModalOpen}
           currentUser={user}
-          onClose={() => setIsPaseModalOpen(false)}
+          initialSalida={editingSalida}
+          onClose={() => { setIsPaseModalOpen(false); setEditingSalida(null); }}
           onSaved={loadData}
         />}
+
+        <RegistroAuditoriaModal isOpen={!!historyId} coleccion="salidas_extraordinarias" registroId={historyId} onClose={() => setHistoryId("")} />
 
         {!isDirectivo && <RetardoModal
           isOpen={isRetardoModalOpen}

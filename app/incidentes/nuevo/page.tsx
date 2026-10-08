@@ -2,8 +2,8 @@
 
 import React, { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { FaltaCatalog, Alumno, ImplicadoIncidente, SeveridadFalta, calcularFechaReincorporacion } from "@/lib/types";
-import { getFaltasCatalog, getAlumnos, saveIncidente } from "@/lib/firestore-service";
+import { FaltaCatalog, Alumno, ImplicadoIncidente, SeveridadFalta, calcularFechaReincorporacion, PersonalEscolarCatalog, MateriaCatalog } from "@/lib/types";
+import { getFaltasCatalog, getAlumnos, saveIncidente, getPersonalEscolarCatalog, getMateriasCatalog } from "@/lib/firestore-service";
 import { useAuth } from "@/lib/auth-context";
 import { ShieldAlert, ArrowLeft, Plus, Trash2, Calendar, UserPlus, FileText, CheckCircle2 } from "lucide-react";
 import Link from "next/link";
@@ -14,6 +14,9 @@ export default function NuevoIncidentePage() {
 
   const [faltas, setFaltas] = useState<FaltaCatalog[]>([]);
   const [alumnos, setAlumnos] = useState<Alumno[]>([]);
+  const [personalCatalog, setPersonalCatalog] = useState<PersonalEscolarCatalog[]>([]);
+  const [materiasCatalog, setMateriasCatalog] = useState<MateriaCatalog[]>([]);
+  const [personaSeleccionada, setPersonaSeleccionada] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
@@ -41,15 +44,19 @@ export default function NuevoIncidentePage() {
   // Implicated list
   const [implicados, setImplicados] = useState<ImplicadoIncidente[]>([]);
   const [selectedMatricula, setSelectedMatricula] = useState("");
+  const [searchAlumno, setSearchAlumno] = useState("");
   const [selectedRol, setSelectedRol] = useState<"AGRESOR" | "VÍCTIMA" | "TESTIGO">("VÍCTIMA");
+  const [diasPorAgresor, setDiasPorAgresor] = useState<Record<string, number>>({});
 
   useEffect(() => {
     async function loadData() {
       setLoading(true);
       try {
-        const [fList, aList] = await Promise.all([getFaltasCatalog(), getAlumnos()]);
+        const [fList, aList, personalList, materiasList] = await Promise.all([getFaltasCatalog(), getAlumnos(), getPersonalEscolarCatalog(), getMateriasCatalog()]);
         setFaltas(fList.filter((f) => f.activa));
         setAlumnos(aList);
+        setPersonalCatalog(personalList.filter((person) => person.activa));
+        setMateriasCatalog(materiasList.filter((materia) => materia.activa));
       } catch (err) {
         console.error("Error cargando datos:", err);
       } finally {
@@ -105,11 +112,33 @@ export default function NuevoIncidentePage() {
         rol_implicado: selectedRol,
       },
     ]);
+    if (selectedRol === "AGRESOR") {
+      setDiasPorAgresor((current) => ({ ...current, [target.matricula]: diasSuspension }));
+    }
     setSelectedMatricula("");
+    setSearchAlumno("");
   };
+
+  const alumnosSugeridos = searchAlumno.trim().length < 2 ? [] : alumnos
+    .filter((alumno) => {
+      const query = searchAlumno.trim().toLocaleLowerCase();
+      return `${alumno.nombre_completo} ${alumno.matricula} ${alumno.grado} ${alumno.grupo}`.toLocaleLowerCase().includes(query);
+    })
+    .filter((alumno) => !implicados.some((implicado) => implicado.alumno_matricula === alumno.matricula))
+    .slice(0, 8);
 
   const handleRemoveImplicado = (matr: string) => {
     setImplicados(implicados.filter((i) => i.alumno_matricula !== matr));
+  };
+
+  const handleAddPersonalCatalogo = () => {
+    const selected = personalCatalog.find((person) => person.id === personaSeleccionada);
+    if (!selected) return;
+    const existing = personalInvolucradoTexto.split(",").map((name) => name.trim().toLocaleLowerCase());
+    if (!existing.includes(selected.nombre.toLocaleLowerCase())) {
+      setPersonalInvolucradoTexto((value) => [...value.split(",").map((name) => name.trim()).filter(Boolean), selected.nombre].join(", "));
+    }
+    setPersonaSeleccionada("");
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -135,6 +164,19 @@ export default function NuevoIncidentePage() {
         categoria,
         severidad,
         implicados,
+        medidas_disciplinarias: implicados
+          .filter((implicado) => implicado.rol_implicado === "AGRESOR")
+          .map((agresor) => {
+            const dias = Number(diasPorAgresor[agresor.alumno_matricula] ?? diasSuspension);
+            const fechas = dias > 0 ? calcularFechaReincorporacion(fechaHora.split(" ")[0], dias) : { fechaFin: "", fechaRegreso: "" };
+            return {
+              alumno_matricula: agresor.alumno_matricula,
+              alumno_nombre: agresor.nombre_completo,
+              dias_suspension: dias,
+              fecha_fin_suspension: fechas.fechaFin,
+              reincorporacion_fecha: fechas.fechaRegreso,
+            };
+          }),
         personal_involucrado: personalInvolucradoTexto.split(",").map((nombre) => nombre.trim()).filter(Boolean),
         materia: materia.trim(),
         descripcion_hechos: descripcionHechos.trim(),
@@ -278,18 +320,39 @@ export default function NuevoIncidentePage() {
             <div className="flex flex-col sm:flex-row items-end gap-3 bg-slate-50 p-3.5 rounded-lg border border-slate-200">
               <div className="flex-1">
                 <label className="text-xs font-bold text-slate-700 block mb-1">Seleccionar Alumno</label>
-                <select
-                  value={selectedMatricula}
-                  onChange={(e) => setSelectedMatricula(e.target.value)}
-                  className="w-full text-xs p-2 bg-white border border-slate-300 rounded-lg focus:ring-2 focus:ring-cyan-500 font-mono"
-                >
-                  <option value="">-- Elige un alumno(a) --</option>
-                  {alumnos.map((a) => (
-                    <option key={a.matricula} value={a.matricula}>
-                      [{a.matricula}] {a.nombre_completo} ({a.grado}° {a.grupo})
-                    </option>
-                  ))}
-                </select>
+                <div className="relative">
+                  <input
+                    type="search"
+                    value={searchAlumno}
+                    onChange={(e) => { setSearchAlumno(e.target.value); setSelectedMatricula(""); }}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" && alumnosSugeridos[0]) {
+                        e.preventDefault();
+                        setSelectedMatricula(alumnosSugeridos[0].matricula);
+                        setSearchAlumno(`[${alumnosSugeridos[0].matricula}] ${alumnosSugeridos[0].nombre_completo}`);
+                      }
+                    }}
+                    placeholder="Busca por nombre o matrícula (mínimo 2 caracteres)…"
+                    autoComplete="off"
+                    aria-label="Buscar alumno implicado"
+                    aria-expanded={alumnosSugeridos.length > 0}
+                    className="w-full text-xs p-2 bg-white border border-slate-300 rounded-lg focus:ring-2 focus:ring-cyan-500"
+                  />
+                  {alumnosSugeridos.length > 0 && !selectedMatricula && <div className="absolute z-20 mt-1 max-h-64 w-full overflow-y-auto rounded-xl border border-slate-200 bg-white p-1 shadow-xl" role="listbox">
+                    {alumnosSugeridos.map((alumno) => <button
+                      key={alumno.matricula}
+                      type="button"
+                      role="option"
+                      aria-selected={false}
+                      onClick={() => { setSelectedMatricula(alumno.matricula); setSearchAlumno(`[${alumno.matricula}] ${alumno.nombre_completo}`); }}
+                      className="flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-xs hover:bg-slate-50"
+                    >
+                      <span className="font-semibold text-slate-800">{alumno.nombre_completo}</span>
+                      <span className="ml-3 shrink-0 font-mono text-slate-500">{alumno.matricula} · {alumno.grado}° {alumno.grupo}</span>
+                    </button>)}
+                  </div>}
+                  {searchAlumno.trim().length >= 2 && !selectedMatricula && alumnosSugeridos.length === 0 && <p className="mt-1 text-[11px] text-slate-500">No hay coincidencias disponibles.</p>}
+                </div>
               </div>
 
               <div className="w-full sm:w-40">
@@ -346,11 +409,19 @@ export default function NuevoIncidentePage() {
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-4 border-t border-slate-100">
             <div>
               <label className="text-xs font-bold text-slate-800 uppercase block mb-1">Docentes / prefectos involucrados</label>
+              {personalCatalog.length > 0 && <div className="mb-2 flex gap-2">
+                <select value={personaSeleccionada} onChange={(event) => setPersonaSeleccionada(event.target.value)} className="min-w-0 flex-1 rounded-lg border border-slate-300 bg-white p-2 text-xs">
+                  <option value="">Seleccionar desde directorio…</option>
+                  {personalCatalog.map((person) => <option key={person.id} value={person.id}>{person.nombre} · {person.cargo}</option>)}
+                </select>
+                <button type="button" onClick={handleAddPersonalCatalogo} disabled={!personaSeleccionada} className="rounded-lg bg-slate-800 px-3 text-xs font-bold text-white disabled:opacity-50">Agregar</button>
+              </div>}
               <input value={personalInvolucradoTexto} onChange={(e) => setPersonalInvolucradoTexto(e.target.value)} placeholder="Nombres separados por coma" className="w-full text-xs p-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-cyan-500" />
             </div>
             <div>
               <label className="text-xs font-bold text-slate-800 uppercase block mb-1">Materia / área</label>
-              <input value={materia} onChange={(e) => setMateria(e.target.value)} placeholder="Materia, patio, pasillo…" className="w-full text-xs p-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-cyan-500" />
+              <input value={materia} list="zentiva-materias" onChange={(e) => setMateria(e.target.value)} placeholder="Busca o escribe materia, patio, pasillo…" className="w-full text-xs p-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-cyan-500" />
+              <datalist id="zentiva-materias">{materiasCatalog.map((item) => <option key={item.id} value={item.nombre} />)}</datalist>
             </div>
           </div>
 
@@ -375,7 +446,7 @@ export default function NuevoIncidentePage() {
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <div>
-                <label className="text-xs font-bold text-slate-700 block mb-1">Días de Suspensión</label>
+                <label className="text-xs font-bold text-slate-700 block mb-1">Días predeterminados por agresor</label>
                 <input
                   type="number"
                   min={0}
@@ -408,6 +479,22 @@ export default function NuevoIncidentePage() {
                 />
               </div>
             </div>
+            <p className="text-[11px] leading-relaxed text-slate-600">
+              La medida se asigna únicamente a los alumnos clasificados como agresores. Ajusta los días de cada uno abajo; víctimas y testigos nunca heredan una suspensión.
+            </p>
+            {implicados.filter((implicado) => implicado.rol_implicado === "AGRESOR").length > 0 && <div className="grid grid-cols-1 gap-2 border-t border-slate-200 pt-3">
+              {implicados.filter((implicado) => implicado.rol_implicado === "AGRESOR").map((agresor) => {
+                const dias = Number(diasPorAgresor[agresor.alumno_matricula] ?? diasSuspension);
+                const fechas = dias > 0 ? calcularFechaReincorporacion(fechaHora.split(" ")[0], dias) : null;
+                return <div key={agresor.alumno_matricula} className="grid grid-cols-1 items-center gap-2 rounded-lg border border-slate-200 bg-white p-3 sm:grid-cols-[1fr_130px_1fr]">
+                  <div><p className="text-xs font-bold text-slate-800">{agresor.nombre_completo}</p><p className="text-[10px] font-mono text-slate-500">{agresor.alumno_matricula} · Agresor</p></div>
+                  <label className="text-[11px] font-semibold text-slate-600">Días de suspensión
+                    <input type="number" min={0} max={15} value={dias} onChange={(event) => setDiasPorAgresor((current) => ({ ...current, [agresor.alumno_matricula]: Number(event.target.value) }))} className="mt-1 w-full rounded-lg border border-slate-300 p-2 text-xs font-mono" />
+                  </label>
+                  <p className="text-[11px] text-slate-600">{fechas ? `Termina ${fechas.fechaFin} · Regresa ${fechas.fechaRegreso}` : "Sin suspensión"}</p>
+                </div>;
+              })}
+            </div>}
 
             {diasSuspension > 0 && (
               <p className="text-[11px] text-slate-500 italic">

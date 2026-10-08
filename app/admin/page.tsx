@@ -8,6 +8,8 @@ import {
   UserProfile,
   UserRole,
   SeveridadFalta,
+  MateriaCatalog,
+  PersonalEscolarCatalog,
 } from "@/lib/types";
 import {
   getColonias,
@@ -20,7 +22,13 @@ import {
   saveInstitucionCanalizacionCatalog,
   deleteInstitucionCanalizacionCatalog,
   getUsers,
+  bulkSaveColoniaCatalog,
+  getPersonalEscolarCatalog,
+  getMateriasCatalog,
+  savePersonalEscolarCatalog,
+  saveMateriaCatalog,
 } from "@/lib/firestore-service";
+import { parseCSVLine } from "@/lib/csv-parser";
 import { useAuth } from "@/lib/auth-context";
 import { auth } from "@/lib/firebase";
 import {
@@ -36,11 +44,12 @@ import {
   XCircle,
   AlertTriangle,
   Search,
+  Upload,
 } from "lucide-react";
 
 export default function AdminPanelPage() {
   const { user } = useAuth();
-  const [activeTab, setActiveTab] = useState<"COLONIAS" | "FALTAS" | "INSTITUCIONES" | "USUARIOS">("COLONIAS");
+  const [activeTab, setActiveTab] = useState<"COLONIAS" | "FALTAS" | "INSTITUCIONES" | "PERSONAL" | "USUARIOS">("COLONIAS");
   const [loading, setLoading] = useState(true);
 
   // Data states
@@ -48,8 +57,13 @@ export default function AdminPanelPage() {
   const [faltas, setFaltas] = useState<FaltaCatalog[]>([]);
   const [instituciones, setInstituciones] = useState<InstitucionCanalizacionCatalog[]>([]);
   const [usuarios, setUsuarios] = useState<UserProfile[]>([]);
+  const [personalEscolar, setPersonalEscolar] = useState<PersonalEscolarCatalog[]>([]);
+  const [materias, setMaterias] = useState<MateriaCatalog[]>([]);
   const [userOperationError, setUserOperationError] = useState("");
   const [passwordResetLink, setPasswordResetLink] = useState("");
+  const [coloniaImportMessage, setColoniaImportMessage] = useState("");
+  const [coloniaImportError, setColoniaImportError] = useState("");
+  const [importingColonias, setImportingColonias] = useState(false);
 
   // Search filter
   const [searchQuery, setSearchQuery] = useState("");
@@ -70,20 +84,68 @@ export default function AdminPanelPage() {
   const loadAllData = async () => {
     setLoading(true);
     try {
-      const [colList, falList, instList, usrList] = await Promise.all([
+      const [colList, falList, instList, usrList, personalList, materiasList] = await Promise.all([
         getColonias(),
         getFaltasCatalog(),
         getInstitucionesCanalizacionCatalog(),
         getUsers(),
+        getPersonalEscolarCatalog(),
+        getMateriasCatalog(),
       ]);
       setColonias(colList);
       setFaltas(falList);
       setInstituciones(instList);
       setUsuarios(usrList);
+      setPersonalEscolar(personalList);
+      setMaterias(materiasList);
     } catch (err) {
       console.error("Error al cargar datos del panel de administración:", err);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleImportColonias = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    setColoniaImportMessage("");
+    setColoniaImportError("");
+    try {
+      const rows = (await file.text()).split(/\r?\n/).filter((line) => line.trim());
+      if (rows.length < 2) throw new Error("El CSV debe incluir encabezados y al menos una colonia.");
+      const headers = parseCSVLine(rows[0]).map((value) => value.trim().toLocaleLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, ""));
+      const index = (...names: string[]) => headers.findIndex((header) => names.includes(header));
+      const nameIndex = index("nombre", "colonia", "nombre_colonia");
+      const postalIndex = index("codigo_postal", "codigo postal", "cp");
+      const municipioIndex = index("municipio", "delegacion");
+      if (nameIndex < 0) throw new Error("Falta una columna llamada nombre o colonia.");
+      const normalized: ColoniaCatalog[] = [];
+      const seen = new Set<string>();
+      for (const line of rows.slice(1)) {
+        const cols = parseCSVLine(line);
+        const nombre = (cols[nameIndex] || "").trim().toUpperCase();
+        if (!nombre) continue;
+        const idSlug = nombre.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "");
+        const id = `col_${idSlug}`;
+        if (seen.has(id)) continue;
+        seen.add(id);
+        normalized.push({
+          id, nombre,
+          codigo_postal: postalIndex < 0 ? "" : (cols[postalIndex] || "").trim(),
+          municipio: municipioIndex < 0 ? "Querétaro" : ((cols[municipioIndex] || "").trim() || "Querétaro"),
+          activa: true, pendiente_revision: false,
+        });
+      }
+      if (!normalized.length) throw new Error("No se encontraron colonias válidas para importar.");
+      setImportingColonias(true);
+      const count = await bulkSaveColoniaCatalog(normalized);
+      await loadAllData();
+      setColoniaImportMessage(`Se importaron ${count} colonias. Las coincidencias por nombre se actualizaron.`);
+    } catch (error: any) {
+      setColoniaImportError(error.message || "No fue posible importar el archivo CSV.");
+    } finally {
+      setImportingColonias(false);
     }
   };
 
@@ -188,6 +250,31 @@ export default function AdminPanelPage() {
       await deleteInstitucionCanalizacionCatalog(id);
       loadAllData();
     }
+  };
+
+  const handleAddPersonal = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const formElement = event.currentTarget;
+    const form = new FormData(event.currentTarget);
+    const nombre = String(form.get("personal_nombre") || "").trim();
+    const cargo = String(form.get("personal_cargo") || "").trim();
+    if (!nombre || !cargo) return;
+    const id = `personal_${nombre.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]+/g, "_")}`;
+    await savePersonalEscolarCatalog({ id, nombre, cargo, activa: true });
+    formElement.reset();
+    await loadAllData();
+  };
+
+  const handleAddMateria = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const formElement = event.currentTarget;
+    const form = new FormData(event.currentTarget);
+    const nombre = String(form.get("materia_nombre") || "").trim();
+    if (!nombre) return;
+    const id = `materia_${nombre.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]+/g, "_")}`;
+    await saveMateriaCatalog({ id, nombre, activa: true });
+    formElement.reset();
+    await loadAllData();
   };
 
   // --- HANDLERS: USUARIOS ---
@@ -306,6 +393,14 @@ export default function AdminPanelPage() {
           </button>
 
           <button
+            onClick={() => setActiveTab("PERSONAL")}
+            className={`px-4 py-2.5 rounded-lg text-xs font-bold transition flex items-center space-x-2 cursor-pointer ${activeTab === "PERSONAL" ? "bg-purple-600 text-white shadow-sm" : "text-slate-700 hover:bg-slate-100"}`}
+          >
+            <Users className="w-4 h-4" />
+            <span>Personal y Materias ({personalEscolar.length} · {materias.length})</span>
+          </button>
+
+          <button
             onClick={() => setActiveTab("USUARIOS")}
             className={`px-4 py-2.5 rounded-lg text-xs font-bold transition flex items-center space-x-2 cursor-pointer ${
               activeTab === "USUARIOS"
@@ -330,17 +425,28 @@ export default function AdminPanelPage() {
                   Incluye colonias validadas y marcadores pendientes creados por selección "Otro".
                 </p>
               </div>
-              <button
-                onClick={() => {
-                  setEditingColonia(null);
-                  setIsColoniaModalOpen(true);
-                }}
-                className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white font-bold rounded-xl text-xs shadow-sm transition flex items-center gap-1.5 cursor-pointer"
-              >
-                <Plus className="w-4 h-4" />
-                <span>+ Agregar Colonia</span>
-              </button>
+              <div className="flex flex-wrap items-center gap-2">
+                <label className="inline-flex cursor-pointer items-center gap-1.5 rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs font-bold text-slate-700 transition hover:bg-slate-50">
+                  <Upload className="h-4 w-4" />
+                  <span>{importingColonias ? "Importando…" : "Importar CSV"}</span>
+                  <input type="file" accept=".csv,text/csv" disabled={importingColonias} onChange={handleImportColonias} className="sr-only" />
+                </label>
+                <button
+                  onClick={() => {
+                    setEditingColonia(null);
+                    setIsColoniaModalOpen(true);
+                  }}
+                  className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white font-bold rounded-xl text-xs shadow-sm transition flex items-center gap-1.5 cursor-pointer"
+                >
+                  <Plus className="w-4 h-4" />
+                  <span>+ Agregar Colonia</span>
+                </button>
+              </div>
             </div>
+
+            <p className="text-[11px] text-slate-500">CSV UTF-8 con encabezados <code>nombre</code>, <code>codigo_postal</code> y <code>municipio</code>. Solo <strong>nombre</strong> es obligatorio; las colonias importadas quedan activas.</p>
+            {coloniaImportMessage && <p role="status" className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-800">{coloniaImportMessage}</p>}
+            {coloniaImportError && <p role="alert" className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-800">{coloniaImportError}</p>}
 
             <div className="overflow-x-auto border border-slate-200 rounded-xl">
               <table className="w-full text-left border-collapse text-xs">
@@ -580,7 +686,42 @@ export default function AdminPanelPage() {
           </div>
         )}
 
-        {/* TAB 4: USUARIOS Y ROLES */}
+        {/* TAB 4: DIRECTORIO DE PERSONAL ESCOLAR Y MATERIAS */}
+        {activeTab === "PERSONAL" && (
+          <div className="grid grid-cols-1 gap-5 xl:grid-cols-2">
+            <section className="space-y-4 rounded-xl border border-slate-300 bg-white p-6 shadow-sm">
+              <div><h3 className="text-sm font-bold uppercase tracking-wide text-slate-900">Personal escolar</h3><p className="mt-1 text-xs text-slate-600">Directorio disponible para relacionar personas con los incidentes.</p></div>
+              <form onSubmit={handleAddPersonal} className="grid grid-cols-1 gap-2 sm:grid-cols-[1fr_1fr_auto]">
+                <input name="personal_nombre" required placeholder="Nombre del docente o prefecto" className="rounded-lg border border-slate-300 p-2.5 text-xs" />
+                <input name="personal_cargo" required placeholder="Cargo / función" className="rounded-lg border border-slate-300 p-2.5 text-xs" />
+                <button className="rounded-lg bg-slate-800 px-3 py-2 text-xs font-bold text-white hover:bg-slate-700">Agregar</button>
+              </form>
+              <div className="divide-y divide-slate-100 rounded-lg border border-slate-200">
+                {personalEscolar.map((person) => <div key={person.id} className="flex items-center justify-between gap-3 p-3 text-xs">
+                  <div><p className="font-semibold text-slate-900">{person.nombre}</p><p className="text-slate-500">{person.cargo}</p></div>
+                  <button type="button" onClick={async () => { await savePersonalEscolarCatalog({ ...person, activa: !person.activa }); await loadAllData(); }} className={`rounded-full border px-2.5 py-1 text-[10px] font-bold ${person.activa ? "border-emerald-200 bg-emerald-50 text-emerald-800" : "border-slate-200 bg-slate-100 text-slate-600"}`}>{person.activa ? "Activo" : "Inactivo"}</button>
+                </div>)}
+                {personalEscolar.length === 0 && <p className="p-4 text-xs text-slate-500">Aún no se han registrado docentes ni personal escolar.</p>}
+              </div>
+            </section>
+            <section className="space-y-4 rounded-xl border border-slate-300 bg-white p-6 shadow-sm">
+              <div><h3 className="text-sm font-bold uppercase tracking-wide text-slate-900">Materias y áreas</h3><p className="mt-1 text-xs text-slate-600">Catálogo utilizado para registrar el contexto académico del incidente.</p></div>
+              <form onSubmit={handleAddMateria} className="flex gap-2">
+                <input name="materia_nombre" required placeholder="Nombre de la materia o área" className="min-w-0 flex-1 rounded-lg border border-slate-300 p-2.5 text-xs" />
+                <button className="rounded-lg bg-slate-800 px-3 py-2 text-xs font-bold text-white hover:bg-slate-700">Agregar</button>
+              </form>
+              <div className="divide-y divide-slate-100 rounded-lg border border-slate-200">
+                {materias.map((materia) => <div key={materia.id} className="flex items-center justify-between gap-3 p-3 text-xs">
+                  <p className="font-semibold text-slate-900">{materia.nombre}</p>
+                  <button type="button" onClick={async () => { await saveMateriaCatalog({ ...materia, activa: !materia.activa }); await loadAllData(); }} className={`rounded-full border px-2.5 py-1 text-[10px] font-bold ${materia.activa ? "border-emerald-200 bg-emerald-50 text-emerald-800" : "border-slate-200 bg-slate-100 text-slate-600"}`}>{materia.activa ? "Activa" : "Inactiva"}</button>
+                </div>)}
+                {materias.length === 0 && <p className="p-4 text-xs text-slate-500">Aún no hay materias en el catálogo.</p>}
+              </div>
+            </section>
+          </div>
+        )}
+
+        {/* TAB 5: USUARIOS Y ROLES */}
         {activeTab === "USUARIOS" && (
           <div className="bg-white rounded-xl border border-slate-300 shadow-sm p-6 space-y-4">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">

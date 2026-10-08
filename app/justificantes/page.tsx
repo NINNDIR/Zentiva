@@ -14,7 +14,10 @@ import {
   Plus,
   Filter,
   Users,
+  Pencil,
+  History,
 } from "lucide-react";
+import { RegistroAuditoriaModal } from "@/components/registro-auditoria-modal";
 
 export default function JustificantesPage() {
   const { user } = useAuth();
@@ -22,6 +25,8 @@ export default function JustificantesPage() {
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [editingJustificante, setEditingJustificante] = useState<JustificanteMedico | null>(null);
+  const [historyId, setHistoryId] = useState("");
 
   const loadData = async () => {
     setLoading(true);
@@ -144,6 +149,7 @@ export default function JustificantesPage() {
                     <th className="py-3 px-5 text-center">Días Justificados</th>
                     <th className="py-3 px-5">Motivo / Institución</th>
                     <th className="py-3 px-5 text-right">Registrado Por</th>
+                    <th className="py-3 px-5 text-right">Acciones</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
@@ -176,6 +182,16 @@ export default function JustificantesPage() {
                       <td className="py-4 px-5 text-right text-slate-700 font-semibold">
                         {j.registrado_por_nombre}
                       </td>
+                      <td className="py-4 px-5">
+                        <div className="flex items-center justify-end gap-1">
+                          {user.role !== "DIRECTIVO" && <button type="button" onClick={() => { setEditingJustificante(j); setIsModalOpen(true); }} className="inline-flex items-center gap-1 rounded-lg px-2 py-1.5 text-[11px] font-semibold text-blue-700 hover:bg-blue-50" title="Editar justificante">
+                            <Pencil className="h-3.5 w-3.5" /> Editar
+                          </button>}
+                          <button type="button" onClick={() => setHistoryId(j.id)} className="rounded-lg p-1.5 text-slate-500 hover:bg-slate-100" title="Ver historial de cambios" aria-label="Ver historial de cambios">
+                            <History className="h-4 w-4" />
+                          </button>
+                        </div>
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -188,9 +204,11 @@ export default function JustificantesPage() {
         <JustificanteModal
           isOpen={isModalOpen}
           currentUser={user}
-          onClose={() => setIsModalOpen(false)}
+          initialJustificante={editingJustificante}
+          onClose={() => { setIsModalOpen(false); setEditingJustificante(null); }}
           onSaved={loadData}
         />
+        <RegistroAuditoriaModal isOpen={!!historyId} coleccion="justificantes" registroId={historyId} onClose={() => setHistoryId("")} />
       </div>
     </div>
   );

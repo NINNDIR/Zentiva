@@ -1,4 +1,4 @@
-import { Alumno, ContactoOficial, generarMatriculaPorGrado } from "./types";
+import { Alumno, ContactoOficial, generarMatriculaPorGrado, normalizarFechaNacimiento } from "./types";
 
 export interface CSVImportResult {
   alumnos: Alumno[];
@@ -62,7 +62,9 @@ export function parseCSVMaestro(csvText: string): CSVImportResult {
       const noLista = Number(getVal(["no_lista", "no lista", "lista"], 2)) || i;
       const turnoRaw = getVal(["turno"], 5).toUpperCase();
       const turno = (turnoRaw.includes("VESP") ? "VESPERTINO" : "MATUTINO") as any;
-      const fechaNacimiento = getVal(["fecha_nacimiento", "fecha nacimiento"], 5) || "2013-01-01";
+      const fechaNacimientoRaw = getVal(["fecha_nacimiento", "fecha nacimiento", "fecha de nacimiento"], 5);
+      const fechaNacimiento = normalizarFechaNacimiento(fechaNacimientoRaw);
+      if (fechaNacimientoRaw && !fechaNacimiento) errores.push(`Línea ${i + 1}: Fecha de nacimiento "${fechaNacimientoRaw}" no válida; la edad se mostrará como no disponible.`);
       const sexoRaw = getVal(["sexo"], 6).toUpperCase();
       const sexo = (sexoRaw.startsWith("F") || sexoRaw === "MUJER" ? "F" : "M") as any;
       const calleNumero = getVal(["domicilio_calle_numero", "calle_numero", "calle y numero", "domicilio"], 7).toUpperCase();
@@ -93,6 +95,7 @@ export function parseCSVMaestro(csvText: string): CSVImportResult {
           id: `c1-${i}`,
           prioridad: 1,
           es_tutor_legal: true,
+          puede_recoger: true,
           nombre: c1Nombre || "TUTOR NO REGISTRADO",
           parentesco: c1Parentesco,
           telefono: c1Telefono,
@@ -109,6 +112,7 @@ export function parseCSVMaestro(csvText: string): CSVImportResult {
           id: `c2-${i}`,
           prioridad: 2,
           es_tutor_legal: false,
+          puede_recoger: true,
           nombre: c2Nombre,
           parentesco: getVal(["c2_parentesco", "tutor2_parentesco"], 16) || "Padre",
           telefono: getVal(["c2_telefono", "tutor2_telefono"], 17) || "",
@@ -125,6 +129,7 @@ export function parseCSVMaestro(csvText: string): CSVImportResult {
           id: `c3-${i}`,
           prioridad: 3,
           es_tutor_legal: false,
+          puede_recoger: true,
           nombre: c3Nombre,
           parentesco: getVal(["c3_parentesco", "tutor3_parentesco"], 22) || "Contacto Emergencia",
           telefono: getVal(["c3_telefono", "tutor3_telefono"], 23) || "",
@@ -169,7 +174,7 @@ export function parseCSVMaestro(csvText: string): CSVImportResult {
   };
 }
 
-function parseCSVLine(line: string): string[] {
+export function parseCSVLine(line: string): string[] {
   const result: string[] = [];
   let current = "";
   let inQuotes = false;

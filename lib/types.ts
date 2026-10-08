@@ -103,9 +103,13 @@ export interface Alumno {
 }
 
 export function calcularEdad(fechaNacimiento: string): number | null {
-  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(fechaNacimiento || "");
-  if (!match) return null;
-  const [, year, month, day] = match;
+  const input = (fechaNacimiento || "").trim();
+  const iso = /^(\d{4})-(\d{1,2})-(\d{1,2})$/.exec(input);
+  const local = /^(\d{1,2})[/.](\d{1,2})[/.](\d{4})$/.exec(input);
+  if (!iso && !local) return null;
+  const year = iso ? iso[1] : local![3];
+  const month = iso ? iso[2] : local![2];
+  const day = iso ? iso[3] : local![1];
   const nac = new Date(Number(year), Number(month) - 1, Number(day));
   if (nac.getFullYear() !== Number(year) || nac.getMonth() !== Number(month) - 1 || nac.getDate() !== Number(day)) return null;
   const hoy = new Date();
@@ -116,6 +120,18 @@ export function calcularEdad(fechaNacimiento: string): number | null {
     edad--;
   }
   return edad;
+}
+
+export function normalizarFechaNacimiento(fechaNacimiento: string): string {
+  const input = (fechaNacimiento || "").trim();
+  const iso = /^(\d{4})-(\d{1,2})-(\d{1,2})$/.exec(input);
+  const local = /^(\d{1,2})[/.](\d{1,2})[/.](\d{4})$/.exec(input);
+  const year = iso ? iso[1] : local?.[3];
+  const month = iso ? iso[2] : local?.[2];
+  const day = iso ? iso[3] : local?.[1];
+  if (!year || !month || !day) return "";
+  const normalized = `${year}-${month.padStart(2, "0")}-${day.padStart(2, "0")}`;
+  return calcularEdad(normalized) === null ? "" : normalized;
 }
 
 export function generarMatriculaPorGrado(grado: 1 | 2 | 3, consecutivo: number): string {
@@ -167,6 +183,14 @@ export interface ImplicadoIncidente {
   rol_implicado: RolImplicado;
 }
 
+export interface MedidaDisciplinariaAlumno {
+  alumno_matricula: string;
+  alumno_nombre: string;
+  dias_suspension: number;
+  fecha_fin_suspension?: string;
+  reincorporacion_fecha?: string;
+}
+
 export type EstatusIncidente = 'ABIERTO' | 'EN PROCESO' | 'CERRADO';
 
 export interface Incidente {
@@ -178,6 +202,7 @@ export interface Incidente {
   categoria: string;
   severidad: SeveridadFalta;
   implicados: ImplicadoIncidente[];
+  medidas_disciplinarias?: MedidaDisciplinariaAlumno[];
   personal_involucrado?: string[];
   materia?: string;
   descripcion_hechos: string;
@@ -213,6 +238,18 @@ export interface AuditLogEntry {
   campos_modificados: string[];
   valor_anterior: Record<string, any>;
   valor_nuevo: Record<string, any>;
+}
+
+export interface RegistroAuditoria {
+  id: string;
+  registro_id: string;
+  coleccion: "salidas_extraordinarias" | "justificantes";
+  fecha_hora: string;
+  usuario_id: string;
+  usuario_nombre: string;
+  campos_modificados: string[];
+  valor_anterior: Record<string, unknown>;
+  valor_nuevo: Record<string, unknown>;
 }
 
 export interface EventoRapido {
@@ -315,6 +352,19 @@ export interface InstitucionCanalizacionCatalog {
   activa: boolean;
 }
 
+export interface PersonalEscolarCatalog {
+  id: string;
+  nombre: string;
+  cargo: string;
+  activa: boolean;
+}
+
+export interface MateriaCatalog {
+  id: string;
+  nombre: string;
+  activa: boolean;
+}
+
 export type TipoEventoTimeline = 'INCIDENTE_GRAVE' | 'RETARDO' | 'CANALIZACIÓN' | 'NOTA' | 'PASE_SALIDA' | 'JUSTIFICANTE';
 
 export interface EventoTimeline {
@@ -329,12 +379,15 @@ export interface EventoTimeline {
 
 // Función auxiliar para calcular el siguiente día hábil sumando días de suspensión
 export function calcularFechaReincorporacion(fechaEvento: string, diasSuspension: number): { fechaFin: string; fechaRegreso: string } {
-  const base = fechaEvento ? new Date(fechaEvento) : new Date();
+  const dateMatch = /^(\d{4})-(\d{2})-(\d{2})/.exec(fechaEvento || "");
+  const base = dateMatch
+    ? new Date(Number(dateMatch[1]), Number(dateMatch[2]) - 1, Number(dateMatch[3]))
+    : fechaEvento ? new Date(fechaEvento) : new Date();
   if (isNaN(base.getTime())) {
     const today = new Date();
     return {
-      fechaFin: today.toISOString().split("T")[0],
-      fechaRegreso: today.toISOString().split("T")[0],
+      fechaFin: formatDateLocal(today),
+      fechaRegreso: formatDateLocal(today),
     };
   }
 
@@ -350,7 +403,7 @@ export function calcularFechaReincorporacion(fechaEvento: string, diasSuspension
     }
   }
 
-  const fechaFin = curr.toISOString().split("T")[0];
+  const fechaFin = formatDateLocal(curr);
 
   // Siguiente día hábil para reincorporación
   let regreso = new Date(curr);
@@ -359,9 +412,13 @@ export function calcularFechaReincorporacion(fechaEvento: string, diasSuspension
     regreso.setDate(regreso.getDate() + 1);
   }
 
-  const fechaRegreso = regreso.toISOString().split("T")[0];
+  const fechaRegreso = formatDateLocal(regreso);
 
   return { fechaFin, fechaRegreso };
+}
+
+function formatDateLocal(date: Date): string {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
 }
 
 // Helper para calcular la semaforización de SLA
@@ -374,13 +431,17 @@ export function obtenerSLAInfo(fechaHoraIncidente: string, estatus: EstatusIncid
     };
   }
 
-  const incDate = new Date(fechaHoraIncidente);
+  const incDate = new Date(fechaHoraIncidente.replace(" ", "T"));
   if (isNaN(incDate.getTime())) {
-    return { color: "VERDE", label: "< 24h", badgeClass: "bg-emerald-50 text-emerald-700 border-emerald-200 font-medium" };
+    return { color: "AMARILLO", label: "Fecha inválida", badgeClass: "bg-amber-50 text-amber-800 border-amber-200 font-medium" };
   }
 
   const now = new Date();
-  const diffHours = Math.abs(now.getTime() - incDate.getTime()) / (1000 * 60 * 60);
+  const elapsedMs = now.getTime() - incDate.getTime();
+  if (elapsedMs < 0) {
+    return { color: "VERDE", label: "Programado", badgeClass: "bg-emerald-50 text-emerald-700 border-emerald-200 font-medium" };
+  }
+  const diffHours = elapsedMs / (1000 * 60 * 60);
 
   if (diffHours < 24) {
     return {
