@@ -109,7 +109,7 @@ export const CSVImportModal: React.FC<Props> = ({
             <div>
               <h2 className="font-bold text-base">Carga de CSV Maestro (Importación Masiva)</h2>
               <p className="text-[11px] text-slate-300">
-                Encabezados Estandarizados: `C1_Nombre`, `C1_Telefono`, `C1_Lugar_Trabajo`, `C1_INE`, etc.
+                Plantilla completa de la Ficha de Identidad del Alumno.
               </p>
             </div>
           </div>
@@ -125,10 +125,10 @@ export const CSVImportModal: React.FC<Props> = ({
           <div className="flex flex-col sm:flex-row items-center justify-between gap-4 p-4 bg-slate-50 border border-slate-200 rounded-xl">
             <div className="space-y-1">
               <span className="font-bold text-xs text-slate-900 font-mono block">
-                Descargar Plantilla Oficial CSV (Con C1, C2 y C3)
+                Descargar Plantilla Oficial CSV (Ficha completa)
               </span>
               <p className="text-xs text-slate-500">
-                Plantilla estandarizada con columnas de alumno, 3 contactos y datos de trabajo.
+                Encabezados estandarizados para importar, editar y volver a exportar los expedientes.
               </p>
             </div>
             <button
@@ -192,15 +192,15 @@ export const CSVImportModal: React.FC<Props> = ({
                   <div className="text-xl font-black text-emerald-950">{parseResult.coloniasUnicas.length}</div>
                 </div>
                 <div className="bg-slate-100 border border-slate-200 p-3 rounded-xl">
-                  <span className="text-[10px] font-bold font-mono text-slate-600">CURPs DUPLICADAS / OMITIDAS</span>
-                  <div className="text-xl font-black text-slate-800">{parseResult.errores.length}</div>
+                  <span className="text-[10px] font-bold font-mono text-rose-700">FILAS CON CAMPOS OBLIGATORIOS FALTANTES</span>
+                  <div className="text-xl font-black text-rose-800">{parseResult.records.filter((r) => r.errors.length).length}</div>
                 </div>
               </div>
 
               {/* Preview Table */}
               <div className="space-y-2">
                 <span className="text-xs font-bold font-mono text-slate-700 block">
-                  Previsualización de Registros a Escribir en Firestore (Primeros 5 de {parseResult.alumnos.length}):
+                  Previsualización ({parseResult.alumnos.length} listas; {parseResult.records.length - parseResult.alumnos.length} bloqueadas):
                 </span>
                 <div className="border border-slate-200 rounded-xl overflow-x-auto">
                   <table className="w-full text-left text-xs text-slate-700">
@@ -214,14 +214,14 @@ export const CSVImportModal: React.FC<Props> = ({
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-200">
-                      {parseResult.alumnos.slice(0, 5).map((a) => (
-                        <tr key={a.matricula} className="hover:bg-slate-50">
+                      {parseResult.records.slice(0, 20).map(({ alumno: a, rowNumber, errors }) => (
+                        <tr key={`${rowNumber}-${a.matricula}`} className={errors.length ? "bg-rose-50 border-rose-300" : "bg-emerald-50/40"}>
                           <td className="p-2.5 font-mono font-bold text-cyan-700">{a.matricula}</td>
                           <td className="p-2.5 font-mono text-slate-600">{a.curp}</td>
                           <td className="p-2.5 font-bold text-slate-900">{a.nombre_completo}</td>
                           <td className="p-2.5 font-mono">{a.grado}º "{a.grupo}"</td>
                           <td className="p-2.5 font-semibold text-slate-800">
-                            {a.contactos_oficiales[0]?.nombre || "N/A"}
+                            {errors.length ? <span className="text-rose-700">{errors.join("; ")}</span> : (a.contactos_oficiales[0]?.nombre || "Listo para confirmar")}
                           </td>
                         </tr>
                       ))}

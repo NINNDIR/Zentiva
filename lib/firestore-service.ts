@@ -127,7 +127,7 @@ export function subscribeAlumnos(
               const data = d.data() as any;
               // Asegurar que la edad estática no exista en memoria
               if ("edad" in data) delete data.edad;
-              return data as Alumno;
+              return { ...data, matricula: data.matricula || d.id } as Alumno;
             });
             setLocal(STORAGE_KEY_ALUMNOS, list);
             onUpdate(list);
@@ -161,7 +161,7 @@ export async function getAlumnos(): Promise<Alumno[]> {
         return snap.docs.map((d) => {
           const data = d.data() as any;
           if ("edad" in data) delete data.edad;
-          return data as Alumno;
+          return { ...data, matricula: data.matricula || d.id } as Alumno;
         });
       }
       setLocal(STORAGE_KEY_ALUMNOS, []);
@@ -279,7 +279,7 @@ export async function bulkImportAlumnos(
     try {
       const writes: Array<{ ref: ReturnType<typeof doc>; data: any; merge?: boolean }> = [];
       for (const alumno of cleanAlumnos) {
-        const ref = doc(db, "alumnos", alumno.matricula);
+        const ref = doc(db, "alumnos", alumno.matricula || alumno.curp);
         writes.push({ ref, data: alumno, merge: true });
       }
 

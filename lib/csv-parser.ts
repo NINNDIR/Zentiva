@@ -1,289 +1,165 @@
 import { Alumno, ContactoOficial, generarMatriculaPorGrado, normalizarFechaNacimiento } from "./types";
 
+export const ALUMNO_CSV_HEADERS = [
+  "Matricula", "CURP", "Nombre_Completo", "Grado", "Grupo", "No_Lista", "Turno", "Fecha_Nacimiento", "Sexo",
+  "Domicilio_Calle_Numero", "Colonia", "Municipio_Estado", "Tel_Casa", "Tipo_Sangre", "Estatura_M", "Peso_KG",
+  "Con_Quien_Vive", "Papa_Nombre", "Papa_Celular", "Papa_Ocupacion", "Papa_Tel_Trabajo", "Papa_Domicilio_Trabajo",
+  "Mama_Nombre", "Mama_Celular", "Mama_Ocupacion", "Mama_Tel_Trabajo", "Mama_Domicilio_Trabajo",
+  "Es_Repetidor", "Escuela_Procedencia", "Grados_Repetidos", "Anos_Primaria", "Padece_Enfermedad",
+  "Especifique_Enfermedad", "Alergias", "Servicio_Medico", "Clinica_No", "No_Afiliacion", "Servicio_USAER",
+  "C1_Nombre", "C1_Telefono", "C1_Relacion", "C2_Nombre", "C2_Telefono", "C2_Relacion",
+];
+
+export interface CSVImportRecord { alumno: Alumno; rowNumber: number; errors: string[] }
 export interface CSVImportResult {
   alumnos: Alumno[];
+  records: CSVImportRecord[];
   coloniasUnicas: string[];
   errores: string[];
 }
 
-export function parseCSVMaestro(csvText: string): CSVImportResult {
-  const lines = csvText
-    .split(/\r?\n/)
-    .map((l) => l.trim())
-    .filter((l) => l.length > 0);
+const normalizeHeader = (value: string) => value.replace(/^\uFEFF/, "").trim().toLocaleLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+const cleanText = (value: unknown) => {
+  const text = String(value ?? "").trim();
+  if (["undefined", "null", "nan"].includes(text.toLowerCase())) return "";
+  return text.normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/\s+/g, " ").toLocaleUpperCase();
+};
+const phone = (value: unknown) => {
+  const digits = cleanText(value).replace(/\D/g, "");
+  return digits.length === 10 ? digits : "";
+};
 
+export function parseCSVMaestro(csvText: string): CSVImportResult {
+  const rows = parseCSV(csvText);
+  if (rows.length < 2) return { alumnos: [], records: [], coloniasUnicas: [], errores: ["El archivo CSV está vacío o solo contiene la línea de encabezados."] };
+  const headers = rows[0].map(normalizeHeader);
+  const index = new Map(headers.map((header, i) => [header, i]));
   const alumnos: Alumno[] = [];
-  const coloniasSet = new Set<string>();
-  const curpsSet = new Set<string>();
+  const records: CSVImportRecord[] = [];
+  const colonias = new Set<string>();
+  const seenCurps = new Set<string>();
+  const counters: Record<number, number> = { 1: 1, 2: 1, 3: 1 };
   const errores: string[] = [];
 
-  if (lines.length <= 1) {
-    return { alumnos: [], coloniasUnicas: [], errores: ["El archivo CSV está vacío o solo contiene la línea de encabezados."] };
-  }
+  rows.slice(1).forEach((row, offset) => {
+    if (row.every((cell) => !cell.trim())) return;
+    const rowNumber = offset + 2;
+    const value = (header: string) => cleanText(row[index.get(normalizeHeader(header)) ?? -1] ?? "");
+    const curp = value("CURP");
+    const nombre = value("Nombre_Completo");
+    const gradoRaw = value("Grado");
+    const grupo = value("Grupo");
+    const rowErrors: string[] = [];
+    if (!nombre) rowErrors.push("Falta Nombre_Completo");
+    if (!curp) rowErrors.push("Falta CURP");
+    if (!gradoRaw) rowErrors.push("Falta Grado");
+    if (!grupo) rowErrors.push("Falta Grupo");
+    if (curp && seenCurps.has(curp)) rowErrors.push("CURP duplicada en el archivo");
+    if (curp) seenCurps.add(curp);
 
-  // Parse header line to find indexes
-  const header = parseCSVLine(lines[0]).map((h) => h.toLowerCase().trim());
-
-  // Count existing consecutive numbers per grade series
-  const consecutivoMap: Record<number, number> = { 1: 1, 2: 1, 3: 1 };
-
-  for (let i = 1; i < lines.length; i++) {
-    const rawLine = lines[i];
-    const row = parseCSVLine(rawLine);
-
-    if (row.length < 3) continue; // Skip blank rows
-
-    try {
-      // Helper to map columns by position or header name aliases
-      const getVal = (colNames: string[], defaultIndex: number): string => {
-        for (const name of colNames) {
-          const idx = header.indexOf(name.toLowerCase());
-          if (idx !== -1 && row[idx] !== undefined && row[idx] !== null) return row[idx].trim();
-        }
-        return row[defaultIndex] ? row[defaultIndex].trim() : "";
-      };
-
-      const curp = getVal(["curp"], 4).toUpperCase();
-
-      // DEDUPLICATION: Skip duplicate CURP within the same CSV file
-      if (curp && curpsSet.has(curp)) {
-        errores.push(`Línea ${i + 1}: Omitido por CURP duplicada en el archivo (${curp}).`);
-        continue;
-      }
-      if (curp) {
-        curpsSet.add(curp);
-      }
-
-      const nombreCompleto = getVal(["nombre_completo", "nombre completo", "nombre"], 3).toUpperCase();
-      const gradoNum = Number(getVal(["grado"], 0)) as 1 | 2 | 3;
-      const grado: 1 | 2 | 3 = [1, 2, 3].includes(gradoNum) ? gradoNum : 1;
-      const grupoRaw = getVal(["grupo"], 1).toUpperCase();
-      const grupo = (["A", "B", "C", "D", "E", "F", "G"].includes(grupoRaw) ? grupoRaw : "A") as any;
-      const noLista = Number(getVal(["no_lista", "no lista", "lista"], 2)) || i;
-      const turnoRaw = getVal(["turno"], 5).toUpperCase();
-      const turno = (turnoRaw.includes("VESP") ? "VESPERTINO" : "MATUTINO") as any;
-      const fechaNacimientoRaw = getVal(["fecha_nacimiento", "fecha nacimiento", "fecha de nacimiento"], 5);
-      const fechaNacimiento = normalizarFechaNacimiento(fechaNacimientoRaw);
-      if (fechaNacimientoRaw && !fechaNacimiento) errores.push(`Línea ${i + 1}: Fecha de nacimiento "${fechaNacimientoRaw}" no válida; la edad se mostrará como no disponible.`);
-      const sexoRaw = getVal(["sexo"], 6).toUpperCase();
-      const sexo = (sexoRaw.startsWith("F") || sexoRaw === "MUJER" ? "F" : "M") as any;
-      const calleNumero = getVal(["domicilio_calle_numero", "calle_numero", "calle y numero", "domicilio"], 7).toUpperCase();
-      const colonia = (getVal(["colonia"], 8) || "FELIPE CARRILLO PUERTO").toUpperCase();
-
-      if (colonia) {
-        coloniasSet.add(colonia);
-      }
-
-      // Generate Immutable Matricula according to Grade (3º -> 24-XXX, 2º -> 25-XXX, 1º -> 26-XXX)
-      const consecutivo = consecutivoMap[grado];
-      consecutivoMap[grado] = consecutivo + 1;
-      const customMatricula = getVal(["matricula"], -1);
-      const matricula = customMatricula && customMatricula.includes("-") 
-        ? customMatricula 
-        : generarMatriculaPorGrado(grado, consecutivo);
-
-      // Contact 1 (Tutor Principal) - Always sanitize to empty strings instead of undefined
-      const c1Nombre = getVal(["c1_nombre", "tutor1_nombre", "tutor_nombre"], 9).toUpperCase();
-      const c1Parentesco = getVal(["c1_parentesco", "tutor1_parentesco"], 10) || "Madre";
-      const c1Telefono = getVal(["c1_telefono", "tutor1_telefono"], 11) || "";
-      const c1Trabajo = getVal(["c1_lugar_trabajo", "tutor1_lugar_trabajo"], 12) || "";
-      const c1TelTrabajo = getVal(["c1_telefono_trabajo", "tutor1_telefono_trabajo"], 13) || "";
-      const c1Ine = getVal(["c1_ine", "tutor1_ine"], 14).toUpperCase() || "";
-
-      const contactos: ContactoOficial[] = [
-        {
-          id: `c1-${i}`,
-          prioridad: 1,
-          es_tutor_legal: true,
-          puede_recoger: true,
-          nombre: c1Nombre || "TUTOR NO REGISTRADO",
-          parentesco: c1Parentesco,
-          telefono: c1Telefono,
-          lugar_trabajo: c1Trabajo,
-          telefono_trabajo: c1TelTrabajo,
-          ine_folio: c1Ine,
-        },
-      ];
-
-      // Contact 2
-      const c2Nombre = getVal(["c2_nombre", "tutor2_nombre"], 15).toUpperCase() || "";
-      if (c2Nombre) {
-        contactos.push({
-          id: `c2-${i}`,
-          prioridad: 2,
-          es_tutor_legal: false,
-          puede_recoger: true,
-          nombre: c2Nombre,
-          parentesco: getVal(["c2_parentesco", "tutor2_parentesco"], 16) || "Padre",
-          telefono: getVal(["c2_telefono", "tutor2_telefono"], 17) || "",
-          lugar_trabajo: getVal(["c2_lugar_trabajo", "tutor2_lugar_trabajo"], 18) || "",
-          telefono_trabajo: getVal(["c2_telefono_trabajo", "tutor2_telefono_trabajo"], 19) || "",
-          ine_folio: getVal(["c2_ine", "tutor2_ine"], 20).toUpperCase() || "",
-        });
-      }
-
-      // Contact 3
-      const c3Nombre = getVal(["c3_nombre", "tutor3_nombre"], 21).toUpperCase() || "";
-      if (c3Nombre) {
-        contactos.push({
-          id: `c3-${i}`,
-          prioridad: 3,
-          es_tutor_legal: false,
-          puede_recoger: true,
-          nombre: c3Nombre,
-          parentesco: getVal(["c3_parentesco", "tutor3_parentesco"], 22) || "Contacto Emergencia",
-          telefono: getVal(["c3_telefono", "tutor3_telefono"], 23) || "",
-          lugar_trabajo: getVal(["c3_lugar_trabajo", "tutor3_lugar_trabajo"], 24) || "",
-          telefono_trabajo: getVal(["c3_telefono_trabajo", "tutor3_telefono_trabajo"], 25) || "",
-          ine_folio: getVal(["c3_ine", "tutor3_ine"], 26).toUpperCase() || "",
-        });
-      }
-
-      const alumno: Alumno = {
-        matricula,
-        curp: curp || `CURP${Date.now()}${i}`,
-        nombre_completo: nombreCompleto || `ALUMNO ${i}`,
-        nombres: "",
-        primer_apellido: "",
-        segundo_apellido: "",
-        grado,
-        grupo,
-        no_lista: noLista,
-        turno,
-        fecha_nacimiento: fechaNacimiento,
-        sexo,
-        domicilio: {
-          calle_numero: calleNumero || "DOMICILIO CONOCIDO",
-          colonia: colonia || "FELIPE CARRILLO PUERTO",
-        },
-        contactos_oficiales: contactos,
-        estatus: "ACTIVO",
-        creado_el: new Date().toISOString(),
-      };
-
-      alumnos.push(alumno);
-    } catch (e: any) {
-      errores.push(`Línea ${i + 1}: ${e.message || "Error al procesar fila"}`);
-    }
-  }
-
-  return {
-    alumnos,
-    coloniasUnicas: Array.from(coloniasSet),
-    errores,
-  };
+    const gradoNumber = Number(gradoRaw);
+    const grado = ([1, 2, 3].includes(gradoNumber) ? gradoNumber : 1) as 1 | 2 | 3;
+    const grupoValid = /^[A-G]$/.test(grupo) ? grupo as Alumno["grupo"] : "A";
+    const matricula = value("Matricula") || generarMatriculaPorGrado(grado, counters[grado]++);
+    const fechaRaw = value("Fecha_Nacimiento");
+    const fecha = normalizarFechaNacimiento(fechaRaw);
+    if (fechaRaw && !fecha) errores.push(`Línea ${rowNumber}: Fecha_Nacimiento no válida.`);
+    const colonia = value("Colonia");
+    if (colonia) colonias.add(colonia);
+    const turnoRaw = value("Turno");
+    const turno = (turnoRaw.includes("VESP") ? "VESPERTINO" : "MATUTINO") as Alumno["turno"];
+    const sexoRaw = value("Sexo");
+    const sexo = (sexoRaw.startsWith("F") ? "F" : "M") as Alumno["sexo"];
+    const phoneFields = ["Tel_Casa", "Papa_Celular", "Papa_Tel_Trabajo", "Mama_Celular", "Mama_Tel_Trabajo", "C1_Telefono", "C2_Telefono"];
+    const fields: Record<string, string> = {};
+    ALUMNO_CSV_HEADERS.forEach((header) => {
+      if (["Matricula", "CURP", "Nombre_Completo", "Grado", "Grupo", "No_Lista", "Turno", "Fecha_Nacimiento", "Sexo", "Domicilio_Calle_Numero", "Colonia", "C1_Nombre", "C1_Telefono", "C1_Relacion", "C2_Nombre", "C2_Telefono", "C2_Relacion"].includes(header)) return;
+      const prop = header.toLocaleLowerCase();
+      fields[prop] = phoneFields.includes(header) ? phone(value(header)) : value(header);
+    });
+    const c1Name = value("C1_Nombre"), c2Name = value("C2_Nombre");
+    const contacts: ContactoOficial[] = [];
+    if (c1Name || value("C1_Telefono")) contacts.push({ prioridad: 1, es_tutor_legal: false, nombre: c1Name, telefono: phone(value("C1_Telefono")), parentesco: value("C1_Relacion") });
+    if (c2Name || value("C2_Telefono")) contacts.push({ prioridad: 2, es_tutor_legal: false, nombre: c2Name, telefono: phone(value("C2_Telefono")), parentesco: value("C2_Relacion") });
+    const noListaRaw = value("No_Lista");
+    const alumno = {
+      ...fields,
+      matricula, curp, nombre_completo: nombre, grado, grupo: grupoValid,
+      no_lista: noListaRaw && Number.isFinite(Number(noListaRaw)) ? Number(noListaRaw) : 0,
+      turno, fecha_nacimiento: fecha, sexo,
+      domicilio: { calle_numero: value("Domicilio_Calle_Numero"), colonia },
+      contactos_oficiales: contacts, estatus: "ACTIVO" as const, creado_el: new Date().toISOString(),
+    } as Alumno;
+    records.push({ alumno, rowNumber, errors: rowErrors });
+    if (!rowErrors.length) alumnos.push(alumno);
+    else errores.push(`Línea ${rowNumber}: ${rowErrors.join(", ")}.`);
+  });
+  return { alumnos, records, coloniasUnicas: Array.from(colonias), errores };
 }
 
 export function parseCSVLine(line: string): string[] {
+  const delimiter = detectDelimiter(line);
   const result: string[] = [];
-  let current = "";
-  let inQuotes = false;
-
+  let current = "", inQuotes = false;
   for (let i = 0; i < line.length; i++) {
     const char = line[i];
-    if (char === '"') {
-      inQuotes = !inQuotes;
-    } else if ((char === "," || char === ";") && !inQuotes) {
-      result.push(current.trim());
-      current = "";
-    } else {
-      current += char;
-    }
+    if (char === '"' && line[i + 1] === '"' && inQuotes) { current += '"'; i++; }
+    else if (char === '"') inQuotes = !inQuotes;
+    else if (char === delimiter && !inQuotes) { result.push(current.trim()); current = ""; }
+    else current += char;
   }
   result.push(current.trim());
   return result;
 }
+function detectDelimiter(line: string): string {
+  let comma = 0, semi = 0, quoted = false;
+  for (const char of line) { if (char === '"') quoted = !quoted; else if (!quoted && char === ",") comma++; else if (!quoted && char === ";") semi++; }
+  return semi > comma ? ";" : ",";
+}
+function parseCSV(text: string): string[][] {
+  const delimiter = detectDelimiter(text.split(/\r?\n/, 1)[0] || ",");
+  const rows: string[][] = [];
+  let row: string[] = [], cell = "", quoted = false;
+  for (let i = 0; i < text.length; i++) {
+    const char = text[i];
+    if (char === '"' && text[i + 1] === '"' && quoted) { cell += '"'; i++; }
+    else if (char === '"') quoted = !quoted;
+    else if (char === delimiter && !quoted) { row.push(cell); cell = ""; }
+    else if ((char === "\n" || char === "\r") && !quoted) { if (char === "\r" && text[i + 1] === "\n") i++; row.push(cell); rows.push(row); row = []; cell = ""; }
+    else cell += char;
+  }
+  if (cell || row.length) { row.push(cell); rows.push(row); }
+  return rows;
+}
 
+export function alumnoToCSVRow(alumno: Alumno): string[] {
+  const a = alumno as Alumno & Record<string, any>;
+  const contacts = a.contactos_oficiales || [];
+  const c1 = contacts.find((c) => c.prioridad === 1), c2 = contacts.find((c) => c.prioridad === 2);
+  const direct: Record<string, unknown> = {
+    Matricula: a.matricula, CURP: a.curp, Nombre_Completo: a.nombre_completo, Grado: a.grado, Grupo: a.grupo,
+    No_Lista: a.no_lista, Turno: a.turno, Fecha_Nacimiento: a.fecha_nacimiento, Sexo: a.sexo,
+    Domicilio_Calle_Numero: a.domicilio?.calle_numero, Colonia: a.domicilio?.colonia,
+    C1_Nombre: a.c1_nombre ?? c1?.nombre, C1_Telefono: a.c1_telefono ?? c1?.telefono, C1_Relacion: a.c1_relacion ?? c1?.parentesco,
+    C2_Nombre: a.c2_nombre ?? c2?.nombre, C2_Telefono: a.c2_telefono ?? c2?.telefono, C2_Relacion: a.c2_relacion ?? c2?.parentesco,
+  };
+  const sourceKeys: Record<string, string> = {
+    Municipio_Estado: "municipio_estado", Tel_Casa: "tel_casa", Tipo_Sangre: "tipo_sangre", Estatura_M: "estatura_m", Peso_KG: "peso_kg",
+    Con_Quien_Vive: "con_quien_vive", Papa_Nombre: "papa_nombre", Papa_Celular: "papa_celular", Papa_Ocupacion: "papa_ocupacion",
+    Papa_Tel_Trabajo: "papa_tel_trabajo", Papa_Domicilio_Trabajo: "papa_domicilio_trabajo", Mama_Nombre: "mama_nombre", Mama_Celular: "mama_celular",
+    Mama_Ocupacion: "mama_ocupacion", Mama_Tel_Trabajo: "mama_tel_trabajo", Mama_Domicilio_Trabajo: "mama_domicilio_trabajo",
+    Es_Repetidor: "es_repetidor", Escuela_Procedencia: "escuela_procedencia", Grados_Repetidos: "grados_repetidos", Anos_Primaria: "anos_primaria",
+    Padece_Enfermedad: "padece_enfermedad", Especifique_Enfermedad: "especifique_enfermedad", Alergias: "alergias", Servicio_Medico: "servicio_medico",
+    Clinica_No: "clinica_no", No_Afiliacion: "no_afiliacion", Servicio_USAER: "servicio_usaer",
+  };
+  for (const [header, key] of Object.entries(sourceKeys)) direct[header] = a[key];
+  return ALUMNO_CSV_HEADERS.map((header) => csvEscape(String(direct[header] ?? "")));
+}
+const csvEscape = (value: string) => `"${value.replace(/"/g, '""')}"`;
 export function generateSampleCSV(): string {
-  const headers = [
-    "Grado",
-    "Grupo",
-    "No_Lista",
-    "Nombre_Completo",
-    "CURP",
-    "Fecha_Nacimiento",
-    "Sexo",
-    "Domicilio_Calle_Numero",
-    "Colonia",
-    "C1_Nombre",
-    "C1_Parentesco",
-    "C1_Telefono",
-    "C1_Lugar_Trabajo",
-    "C1_Telefono_Trabajo",
-    "C1_INE",
-    "C2_Nombre",
-    "C2_Parentesco",
-    "C2_Telefono",
-    "C2_Lugar_Trabajo",
-    "C2_Telefono_Trabajo",
-    "C2_INE",
-    "C3_Nombre",
-    "C3_Parentesco",
-    "C3_Telefono",
-    "C3_Lugar_Trabajo",
-    "C3_Telefono_Trabajo",
-    "C3_INE",
-  ].join(",");
-
-  const sampleRow1 = [
-    "2",
-    "G",
-    "1",
-    "ACOSTA CRUZ NASHLA MAHELY",
-    "AOCN131222MQTRSA9",
-    "2013-12-22",
-    "F",
-    "NIÑOS HEROES NO. 13",
-    "FELIPE CARRILLO PUERTO",
-    "MARIA CRUZ FUENTES",
-    "Madre",
-    "4428368526",
-    "Comercializadora del Bajío",
-    "4422110099",
-    "IDMEX1234567890",
-    "ROBERTO ACOSTA HERNÁNDEZ",
-    "Padre",
-    "4421987654",
-    "Talleres Industriales",
-    "4423334455",
-    "",
-    "CARMEN FUENTES LÓPEZ",
-    "Abuela",
-    "4425551234",
-    "Hogar",
-    "",
-    "",
-  ].join(",");
-
-  const sampleRow2 = [
-    "1",
-    "A",
-    "12",
-    "GARCÍA MENDOZA MATEO",
-    "GARM120515HQTRRN01",
-    "2014-05-15",
-    "M",
-    "AV. REVOLUCIÓN NO. 450",
-    "SATÉLITE",
-    "PATRICIA MENDOZA RÍOS",
-    "Madre",
-    "4429876543",
-    "Hospital General de Querétaro",
-    "4424445566",
-    "IDMEX9876543210",
-    "JORGE GARCÍA VEGA",
-    "Tío",
-    "4423456789",
-    "",
-    "",
-    "",
-    "",
-    "",
-    "",
-    "",
-    "",
-    "",
-  ].join(",");
-
-  return `${headers}\n${sampleRow1}\n${sampleRow2}`;
+  const values: Record<string, string> = { CURP: "AOCN131222MQTRSA9", Nombre_Completo: "ALUMNO DE EJEMPLO", Grado: "2", Grupo: "A", No_Lista: "1", Turno: "MATUTINO", Fecha_Nacimiento: "2013-12-22", Sexo: "F", Colonia: "CENTRO" };
+  return `\uFEFF${ALUMNO_CSV_HEADERS.join(",")}\r\n${ALUMNO_CSV_HEADERS.map((h) => csvEscape(values[h] || "")).join(",")}`;
+}
+export function generateAlumnosCSV(alumnos: Alumno[]): string {
+  return `\uFEFF${ALUMNO_CSV_HEADERS.join(",")}\r\n${alumnos.map((alumno) => alumnoToCSVRow(alumno).join(",")).join("\r\n")}`;
 }

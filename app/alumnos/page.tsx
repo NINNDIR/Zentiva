@@ -3,7 +3,8 @@
 import React, { useEffect, useState } from "react";
 import { useAuth } from "@/lib/auth-context";
 import { Alumno } from "@/lib/types";
-import { subscribeAlumnos } from "@/lib/firestore-service";
+import { getAlumnos, subscribeAlumnos } from "@/lib/firestore-service";
+import { generateAlumnosCSV } from "@/lib/csv-parser";
 import { AlumnoFormView } from "@/components/alumnos/alumno-form-view";
 import { AlumnoModalForm } from "@/components/alumnos/alumno-modal-form";
 import { CSVImportModal } from "@/components/alumnos/csv-import-modal";
@@ -16,6 +17,7 @@ import {
   Filter,
   ChevronRight,
   Radio,
+  Download,
 } from "lucide-react";
 
 export default function AlumnosPage() {
@@ -78,6 +80,24 @@ export default function AlumnosPage() {
     setIsDeleteModalOpen(true);
   };
 
+  const handleExportAlumnos = async () => {
+    try {
+      const rows = await getAlumnos();
+      const blob = new Blob([generateAlumnosCSV(rows)], { type: "text/csv;charset=utf-8;" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = "zentiva_alumnos.csv";
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      console.error("Error exportando alumnos:", error);
+      window.alert("No fue posible consultar la base de alumnos para exportarla.");
+    }
+  };
+
   // Filtering logic
   const filteredAlumnos = alumnos.filter((a) => {
     const matchesSearch =
@@ -118,8 +138,16 @@ export default function AlumnosPage() {
             </p>
           </div>
 
+          <div className="flex flex-wrap items-center gap-2.5 self-start sm:self-auto">
+              <button
+                onClick={handleExportAlumnos}
+                className="px-3.5 py-2 bg-blue-700 hover:bg-blue-800 text-white font-semibold rounded-lg text-xs transition flex items-center space-x-2 shadow-xs"
+              >
+                <Download className="w-4 h-4" />
+                <span>Exportar Alumnos (CSV)</span>
+              </button>
           {!isDirectivo && (
-            <div className="flex flex-wrap items-center gap-2.5 self-start sm:self-auto">
+            <>
               <button
                 onClick={() => setIsCSVModalOpen(true)}
                 className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold rounded-lg text-xs transition flex items-center space-x-2 shadow-xs"
@@ -135,8 +163,9 @@ export default function AlumnosPage() {
                 <UserPlus className="w-4 h-4" />
                 <span>Nuevo Registro</span>
               </button>
-            </div>
+            </>
           )}
+          </div>
         </div>
 
         {/* Search & Filters Bar */}

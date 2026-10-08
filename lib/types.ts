@@ -100,6 +100,39 @@ export interface Alumno {
   contactos_oficiales: ContactoOficial[];
   estatus: 'ACTIVO' | 'INACTIVO' | 'BAJA';
   creado_el?: string;
+  municipio_estado?: string;
+  tel_casa?: string;
+  tipo_sangre?: string;
+  estatura_m?: string;
+  peso_kg?: string;
+  con_quien_vive?: string;
+  papa_nombre?: string;
+  papa_celular?: string;
+  papa_ocupacion?: string;
+  papa_tel_trabajo?: string;
+  papa_domicilio_trabajo?: string;
+  mama_nombre?: string;
+  mama_celular?: string;
+  mama_ocupacion?: string;
+  mama_tel_trabajo?: string;
+  mama_domicilio_trabajo?: string;
+  es_repetidor?: string;
+  escuela_procedencia?: string;
+  grados_repetidos?: string;
+  anos_primaria?: string;
+  padece_enfermedad?: string;
+  especifique_enfermedad?: string;
+  alergias?: string;
+  servicio_medico?: string;
+  clinica_no?: string;
+  no_afiliacion?: string;
+  servicio_usaer?: string;
+  c1_nombre?: string;
+  c1_telefono?: string;
+  c1_relacion?: string;
+  c2_nombre?: string;
+  c2_telefono?: string;
+  c2_relacion?: string;
 }
 
 export function calcularEdad(fechaNacimiento: string): number | null {
