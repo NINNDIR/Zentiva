@@ -11,6 +11,7 @@ import { ShieldAlert, Plus, Search, Filter, Eye, AlertCircle, Clock, CheckCircle
 
 export default function IncidentesPage() {
   const { user } = useAuth();
+  const isDirectivo = user?.role === "DIRECTIVO";
   const [incidentes, setIncidentes] = useState<Incidente[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
@@ -68,7 +69,7 @@ export default function IncidentesPage() {
             </p>
           </div>
 
-          <div className="flex items-center space-x-3">
+          {!isDirectivo && <div className="flex items-center space-x-3">
             <Link
               href="/incidentes/nuevo"
               className="px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold shadow-sm transition flex items-center space-x-2"
@@ -76,7 +77,7 @@ export default function IncidentesPage() {
               <Plus className="w-4 h-4" />
               <span>+ Registrar Incidente</span>
             </Link>
-          </div>
+          </div>}
         </div>
 
         {/* Executive KPI Cards */}

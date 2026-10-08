@@ -29,7 +29,7 @@ export default function LoginPage() {
     try {
       await loginWithEmail(email, password);
     } catch (err: any) {
-      setError("Credenciales no válidas. Por favor verifica tu correo y contraseña.");
+      setError(err?.message || "No fue posible iniciar sesión. Verifica tu acceso.");
     } finally {
       setSubmitting(false);
     }

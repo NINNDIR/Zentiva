@@ -34,6 +34,7 @@ export default function EventosRapidosPage() {
   }, []);
 
   if (!user) return null;
+  const isDirectivo = user.role === "DIRECTIVO";
 
   const filteredEventos = eventos.filter((ev) => {
     const matchesSearch =
@@ -47,7 +48,7 @@ export default function EventosRapidosPage() {
   });
 
   const pasesCount = eventos.filter((e) => e.tipo === "PASE_SALIDA").length;
-  const retardosCount = eventos.filter((e) => e.tipo === "RETARDO_MASIVO").length;
+  const retardosCount = eventos.filter((e) => e.tipo === "RETARDO_MASIVO" || e.tipo === "RETARDO_INDIVIDUAL").length;
 
   return (
     <div className="min-h-screen bg-slate-100 py-8 px-4 sm:px-6 lg:px-8 font-sans">
@@ -68,7 +69,7 @@ export default function EventosRapidosPage() {
             </p>
           </div>
 
-          <div className="flex items-center space-x-3">
+          {!isDirectivo && <div className="flex items-center space-x-3">
             <button
               onClick={() => setIsRetardoModalOpen(true)}
               className="px-4 py-2.5 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-bold shadow-sm transition flex items-center space-x-2 cursor-pointer"
@@ -84,7 +85,7 @@ export default function EventosRapidosPage() {
               <LogOut className="w-4 h-4" />
               <span>+ Emitir Pase de Salida</span>
             </button>
-          </div>
+          </div>}
         </div>
 
         {/* Executive Summary Cards */}
@@ -133,6 +134,7 @@ export default function EventosRapidosPage() {
               <option value="TODOS">Todos los Eventos</option>
               <option value="PASE_SALIDA">Pase de Salida</option>
               <option value="RETARDO_MASIVO">Retardo de Asistencia</option>
+              <option value="RETARDO_INDIVIDUAL">Retardo Individual</option>
             </select>
           </div>
         </div>
@@ -210,19 +212,19 @@ export default function EventosRapidosPage() {
         </div>
 
         {/* Modals */}
-        <PaseSalidaModal
+        {!isDirectivo && <PaseSalidaModal
           isOpen={isPaseModalOpen}
           currentUser={user}
           onClose={() => setIsPaseModalOpen(false)}
           onSaved={loadData}
-        />
+        />}
 
-        <RetardoModal
+        {!isDirectivo && <RetardoModal
           isOpen={isRetardoModalOpen}
           currentUser={user}
           onClose={() => setIsRetardoModalOpen(false)}
           onSaved={loadData}
-        />
+        />}
       </div>
     </div>
   );

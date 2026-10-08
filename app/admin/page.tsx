@@ -8,7 +8,6 @@ import {
   UserProfile,
   UserRole,
   SeveridadFalta,
-  OFFICIAL_PLANTEL,
 } from "@/lib/types";
 import {
   getColonias,
@@ -21,10 +20,9 @@ import {
   saveInstitucionCanalizacionCatalog,
   deleteInstitucionCanalizacionCatalog,
   getUsers,
-  saveUserProfile,
-  deleteUserProfile,
 } from "@/lib/firestore-service";
 import { useAuth } from "@/lib/auth-context";
+import { auth } from "@/lib/firebase";
 import {
   ShieldCheck,
   Building,
@@ -50,6 +48,8 @@ export default function AdminPanelPage() {
   const [faltas, setFaltas] = useState<FaltaCatalog[]>([]);
   const [instituciones, setInstituciones] = useState<InstitucionCanalizacionCatalog[]>([]);
   const [usuarios, setUsuarios] = useState<UserProfile[]>([]);
+  const [userOperationError, setUserOperationError] = useState("");
+  const [passwordResetLink, setPasswordResetLink] = useState("");
 
   // Search filter
   const [searchQuery, setSearchQuery] = useState("");
@@ -198,23 +198,48 @@ export default function AdminPanelPage() {
     const displayName = (formData.get("displayName") as string).trim();
     if (!email || !displayName) return;
 
-    const uid = editingUser?.uid || `usr_${Date.now()}`;
-    await saveUserProfile({
-      uid,
-      email,
-      displayName,
-      role: formData.get("role") as UserRole,
-      cargo: (formData.get("cargo") as string) || "Personal Escolar",
-      plantel: OFFICIAL_PLANTEL,
-    });
-    setIsUserModalOpen(false);
-    loadAllData();
+    setUserOperationError("");
+    setPasswordResetLink("");
+    try {
+      const idToken = await auth.currentUser?.getIdToken();
+      if (!idToken) throw new Error("Vuelve a iniciar sesión como Super Usuario.");
+      const response = await fetch("/api/admin/users", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${idToken}` },
+        body: JSON.stringify({
+          uid: editingUser?.uid,
+          email,
+          displayName,
+          role: formData.get("role") as UserRole,
+          cargo: (formData.get("cargo") as string) || "Personal Escolar",
+        }),
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || "No se pudo guardar el usuario.");
+      if (result.passwordResetLink) setPasswordResetLink(result.passwordResetLink);
+      setIsUserModalOpen(false);
+      await loadAllData();
+    } catch (error: any) {
+      setUserOperationError(error.message || "No se pudo guardar el usuario.");
+    }
   };
 
   const handleDeleteUser = async (uid: string, email: string) => {
     if (confirm(`¿Eliminar la cuenta de usuario (${email}) en Firestore?`)) {
-      await deleteUserProfile(uid);
-      loadAllData();
+      try {
+        const idToken = await auth.currentUser?.getIdToken();
+        if (!idToken) throw new Error("Vuelve a iniciar sesión como Super Usuario.");
+        const response = await fetch("/api/admin/users", {
+          method: "DELETE",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${idToken}` },
+          body: JSON.stringify({ uid }),
+        });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error || "No se pudo eliminar el usuario.");
+        await loadAllData();
+      } catch (error: any) {
+        setUserOperationError(error.message || "No se pudo eliminar el usuario.");
+      }
     }
   };
 
@@ -564,7 +589,7 @@ export default function AdminPanelPage() {
                   Gestión de Cuentas y Roles de Usuario (`usuarios`)
                 </h3>
                 <p className="text-xs text-slate-600">
-                  Asignación de privilegios para Super Usuario, Trabajadora Social y Directivos.
+                  Crea cuentas en Firebase Authentication y asigna Custom Claims desde el servidor.
                 </p>
               </div>
               <button
@@ -579,6 +604,13 @@ export default function AdminPanelPage() {
               </button>
             </div>
 
+            {userOperationError && <p role="alert" className="rounded-lg border border-rose-200 bg-rose-50 p-3 text-xs font-semibold text-rose-800">{userOperationError}</p>}
+            {passwordResetLink && (
+              <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-900">
+                Cuenta creada. Copia y envía este enlace de configuración de contraseña a la persona:
+                <a className="mt-2 block break-all font-bold underline" href={passwordResetLink} target="_blank" rel="noreferrer">Abrir enlace de configuración</a>
+              </div>
+            )}
             <div className="overflow-x-auto border border-slate-200 rounded-xl">
               <table className="w-full text-left border-collapse text-xs">
                 <thead>

@@ -73,7 +73,7 @@ export default function JustificantesPage() {
             </p>
           </div>
 
-          <div className="flex items-center space-x-3">
+          {user.role !== "DIRECTIVO" && <div className="flex items-center space-x-3">
             <button
               onClick={() => setIsModalOpen(true)}
               className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-sm transition flex items-center space-x-2 cursor-pointer"
@@ -81,7 +81,7 @@ export default function JustificantesPage() {
               <Plus className="w-4 h-4" />
               <span>+ Nuevo Justificante Médico</span>
             </button>
-          </div>
+          </div>}
         </div>
 
         {/* Executive Summary Cards */}

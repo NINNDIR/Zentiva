@@ -1,0 +1,11 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    // Keep the Storage bucket closed by default. INE/document images are not
+    // collected by the application; add narrowly scoped evidence paths only
+    // when the physical-report evidence workflow is implemented.
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}

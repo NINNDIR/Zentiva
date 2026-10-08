@@ -3,36 +3,117 @@
 @tailwind utilities;
 
 :root {
-  --background: #f1f5f9;
+  color-scheme: light;
+  --background: #eef2f6;
   --foreground: #0f172a;
+  --surface: #ffffff;
+  --surface-border: #d8e0ea;
+  --accent: #2563eb;
+}
+
+html {
+  min-height: 100%;
+  scroll-behavior: smooth;
 }
 
 body {
+  min-height: 100vh;
   color: var(--foreground);
   background-color: var(--background);
   overflow-x: hidden;
   -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
 }
 
-@layer components {
-  /* Linear / SaaS Modern Corporate Cards & Utilities */
-  .zentiva-card {
-    background-color: #ffffff;
-    border: 1px solid #e2e8f0;
-    border-radius: 0.75rem;
-    box-shadow: 0 1px 3px 0 rgba(15, 23, 42, 0.05), 0 1px 2px -1px rgba(15, 23, 42, 0.05);
-    transition: all 0.2s ease-in-out;
-  }
+::selection {
+  color: #1e3a8a;
+  background: #dbeafe;
+}
 
-  .zentiva-card:hover {
-    box-shadow: 0 4px 6px -1px rgba(15, 23, 42, 0.08), 0 2px 4px -2px rgba(15, 23, 42, 0.04);
+/* Keep the existing route components visually consistent while they evolve. */
+.min-h-screen.bg-slate-100 {
+  background-color: var(--background);
+}
+
+main .bg-white.rounded-xl[class*="border"],
+main .bg-white.rounded-2xl[class*="border"],
+.zentiva-card {
+  border-color: var(--surface-border);
+  border-radius: 1rem;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.045),
+    0 5px 16px rgba(15, 23, 42, 0.045);
+  transition: box-shadow 200ms ease, border-color 200ms ease,
+    transform 200ms ease;
+}
+
+main .bg-white.rounded-xl[class*="border"]:hover,
+main .bg-white.rounded-2xl[class*="border"]:hover,
+.zentiva-card:hover {
+  border-color: #cbd5e1;
+  box-shadow: 0 8px 22px rgba(15, 23, 42, 0.075);
+}
+
+input:not([type="checkbox"]):not([type="radio"]),
+select,
+textarea {
+  border-radius: 0.75rem;
+  border-color: #cbd5e1;
+  color: #0f172a;
+  background-color: #fff;
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: #64748b;
+  opacity: 1;
+}
+
+input:focus,
+select:focus,
+textarea:focus {
+  border-color: #3b82f6;
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15);
+}
+
+button,
+a {
+  -webkit-tap-highlight-color: transparent;
+}
+
+button:focus-visible,
+a:focus-visible {
+  outline: 3px solid rgba(59, 130, 246, 0.48);
+  outline-offset: 2px;
+}
+
+table thead {
+  background-color: #f8fafc;
+}
+
+.app-main-nav {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.app-main-nav::-webkit-scrollbar {
+  display: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
   }
 }
 
-/* Clean Custom Scrollbars */
+/* Clean, quiet scrollbars */
 ::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+  width: 7px;
+  height: 7px;
 }
 
 ::-webkit-scrollbar-track {
@@ -41,9 +122,10 @@ body {
 
 ::-webkit-scrollbar-thumb {
   background: #cbd5e1;
-  border-radius: 3px;
+  border: 2px solid #f1f5f9;
+  border-radius: 999px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #2563eb;
+  background: #94a3b8;
 }

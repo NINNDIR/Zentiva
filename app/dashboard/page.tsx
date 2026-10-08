@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
 import { Incidente, Alumno, EventoRapido, obtenerSLAInfo } from "@/lib/types";
 import { getIncidentes, getAlumnos, getEventosRapidos } from "@/lib/firestore-service";
@@ -24,11 +25,16 @@ import {
 
 export default function DashboardPage() {
   const { user } = useAuth();
+  const router = useRouter();
   const [incidentes, setIncidentes] = useState<Incidente[]>([]);
   const [alumnos, setAlumnos] = useState<Alumno[]>([]);
   const [eventos, setEventos] = useState<EventoRapido[]>([]);
   const [loading, setLoading] = useState(true);
   const [isPaseModalOpen, setIsPaseModalOpen] = useState(false);
+
+  useEffect(() => {
+    if (user?.role === "DIRECTIVO") router.replace("/dashboard/directivo");
+  }, [user, router]);
 
   const loadData = async () => {
     setLoading(true);
@@ -85,27 +91,28 @@ export default function DashboardPage() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-100 text-slate-900 flex flex-col font-sans">
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 flex-1 space-y-6">
+    <div className="min-h-screen bg-[#EEF2F6] text-slate-900 flex flex-col font-sans">
+      <main className="max-w-[1440px] mx-auto w-full px-4 sm:px-6 lg:px-8 py-8 flex-1 space-y-7">
         
         {/* ========================================================
             SECCIÓN 1: BARRA DE ACCIONES RÁPIDAS (OPERATIVA TS)
            ======================================================== */}
-        <div className="bg-white border border-slate-300 shadow-sm rounded-xl p-5 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+        <div className="bg-white border border-slate-200/80 shadow-sm rounded-2xl p-6 flex flex-col md:flex-row items-start md:items-center justify-between gap-5">
           <div>
-            <span className="text-xs font-bold text-blue-700 uppercase tracking-wider block">
-              Operación Diaria de Trabajo Social
+            <span className="text-xs font-semibold text-blue-700 uppercase tracking-wider block">
+              Espacio de trabajo · Trabajo social
             </span>
-            <h1 className="text-xl font-black text-slate-900 tracking-tight mt-0.5">
-              Panel de Atención Inmediata y Tareas del Día
+            <h1 className="text-2xl sm:text-3xl font-semibold text-slate-900 tracking-tight mt-1">
+              Hola, {user.displayName?.split(" ")[0] || "bienvenido"}
             </h1>
+            <p className="mt-1 text-sm text-slate-600">Revisa pendientes y accede a las tareas frecuentes de hoy.</p>
           </div>
 
           {/* Quick Action Buttons */}
-          <div className="flex flex-wrap items-center gap-2.5 w-full md:w-auto">
+          {user?.role !== "DIRECTIVO" && <div className="flex flex-wrap items-center gap-2.5 w-full md:w-auto">
             <Link
               href="/incidentes/nuevo"
-              className="px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl text-xs shadow-sm transition flex items-center gap-2"
+              className="px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-xl text-sm shadow-sm transition-transform duration-200 hover:scale-[1.01] active:scale-[0.99] flex items-center gap-2"
             >
               <Plus className="w-4 h-4" />
               <span>+ Nuevo Incidente</span>
@@ -113,7 +120,7 @@ export default function DashboardPage() {
 
             <button
               onClick={() => setIsPaseModalOpen(true)}
-              className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl text-xs shadow-sm transition flex items-center gap-2 cursor-pointer"
+              className="px-4 py-2.5 bg-slate-900 hover:bg-slate-800 text-white font-medium rounded-xl text-sm shadow-sm transition-transform duration-200 hover:scale-[1.01] active:scale-[0.99] flex items-center gap-2 cursor-pointer"
             >
               <LogOut className="w-4 h-4" />
               <span>+ Pase de Salida</span>
@@ -121,7 +128,7 @@ export default function DashboardPage() {
 
             <Link
               href="/alumnos"
-              className="px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl text-xs shadow-sm transition flex items-center gap-2"
+              className="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-800 font-medium rounded-xl text-sm transition-transform duration-200 hover:scale-[1.01] active:scale-[0.99] flex items-center gap-2"
             >
               <FileCheck2 className="w-4 h-4" />
               <span>+ Justificante Médico</span>
@@ -129,12 +136,12 @@ export default function DashboardPage() {
 
             <Link
               href="/eventos-rapidos"
-              className="px-4 py-2.5 bg-amber-600 hover:bg-amber-700 text-white font-bold rounded-xl text-xs shadow-sm transition flex items-center gap-2"
+              className="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-800 font-medium rounded-xl text-sm transition-transform duration-200 hover:scale-[1.01] active:scale-[0.99] flex items-center gap-2"
             >
               <Clock className="w-4 h-4" />
               <span>+ Registrar Retardo</span>
             </Link>
-          </div>
+          </div>}
         </div>
 
         {/* ========================================================
@@ -496,12 +503,12 @@ export default function DashboardPage() {
       </main>
 
       {/* Pase de Salida Modal */}
-      <PaseSalidaModal
+      {user?.role !== "DIRECTIVO" && <PaseSalidaModal
         isOpen={isPaseModalOpen}
         currentUser={user}
         onClose={() => setIsPaseModalOpen(false)}
         onSaved={loadData}
-      />
+      />}
     </div>
   );
 }

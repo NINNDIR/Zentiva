@@ -5,7 +5,6 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Logo } from "./logo";
 import { useAuth } from "@/lib/auth-context";
-import { DEMO_USERS } from "@/lib/types";
 import {
   Users,
   LayoutDashboard,
@@ -14,7 +13,6 @@ import {
   LogOut,
   Sparkles,
   Building2,
-  UserCheck,
   FileCheck,
   BarChart3,
   ShieldCheck,
@@ -24,105 +22,89 @@ export const Navbar: React.FC = () => {
   const { user, logout } = useAuth();
   const pathname = usePathname();
 
-  // Do not render navbar if not logged in or on login page
   if (!user || pathname === "/login") return null;
 
-  const roleInfo = DEMO_USERS[user.role] || DEMO_USERS.TRABAJADORA_SOCIAL;
-
+  const dashboardHref = user.role === "DIRECTIVO" ? "/dashboard/directivo" : "/dashboard";
   const navItems = [
-    { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
-    { label: "Alumnos & Expedientes", href: "/alumnos", icon: Users },
+    { label: "Inicio", href: dashboardHref, icon: LayoutDashboard },
+    { label: "Alumnos", href: "/alumnos", icon: Users },
     { label: "Incidentes", href: "/incidentes", icon: ShieldAlert },
-    { label: "Pase de Salida & Retardos", href: "/eventos-rapidos", icon: Clock },
+    { label: "Pases y retardos", href: "/eventos-rapidos", icon: Clock },
     { label: "Justificantes", href: "/justificantes", icon: FileCheck },
     { label: "Canalizaciones", href: "/canalizaciones", icon: Sparkles },
   ];
 
-  if (user.role === "DIRECTIVO" || user.role === "SUPER_USUARIO") {
-    navItems.push({ label: "Analítica Directiva", href: "/dashboard/directivo", icon: BarChart3 });
-  }
-
   if (user.role === "SUPER_USUARIO") {
-    navItems.push({ label: "Panel Admin", href: "/admin", icon: ShieldCheck });
+    navItems.push({ label: "Analítica", href: "/dashboard/directivo", icon: BarChart3 });
+    navItems.push({ label: "Administración", href: "/admin", icon: ShieldCheck });
   }
 
-  const getRoleIcon = () => {
-    switch (user.role) {
-      case "SUPER_USUARIO":
-        return <UserCheck className="w-3.5 h-3.5 text-purple-300" />;
-      case "TRABAJADORA_SOCIAL":
-        return <Sparkles className="w-3.5 h-3.5 text-cyan-300" />;
-      case "DIRECTIVO":
-        return <Building2 className="w-3.5 h-3.5 text-amber-300" />;
-    }
+  const roleLabels: Record<string, string> = {
+    SUPER_USUARIO: "Administrador",
+    TRABAJADORA_SOCIAL: "Trabajo social",
+    DIRECTIVO: "Directivo",
   };
+  const roleIcon = user.role === "SUPER_USUARIO"
+    ? <ShieldCheck className="h-3.5 w-3.5 text-violet-600" />
+    : user.role === "DIRECTIVO"
+      ? <Building2 className="h-3.5 w-3.5 text-amber-600" />
+      : <Sparkles className="h-3.5 w-3.5 text-cyan-700" />;
 
   return (
-    <header className="bg-slate-900 border-b border-slate-800 text-white sticky top-0 z-50 shadow-md">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
-        
-        {/* Left: Logo & Main Navigation Links */}
-        <div className="flex items-center space-x-8">
-          <Link href="/dashboard" className="flex items-center hover:opacity-95 transition">
-            <Logo size="md" variant="navy" />
-          </Link>
+    <header className="sticky top-0 z-50 border-b border-slate-200/80 bg-white/85 text-slate-900 shadow-sm backdrop-blur-xl">
+      <div className="mx-auto flex h-[4.25rem] max-w-[1440px] items-center justify-between gap-4 px-4 sm:px-6 lg:px-8">
+        <Link href={dashboardHref} aria-label="Zentiva, ir al inicio" className="shrink-0 transition-opacity hover:opacity-80">
+          <Logo size="md" variant="light" />
+        </Link>
 
-          <nav className="hidden md:flex items-center space-x-1.5">
-            {navItems.map((item) => {
-              const Icon = item.icon;
-              const isActive = pathname.startsWith(item.href);
-              return (
-                <Link
-                  key={item.href}
-                  href={item.href}
-                  className={`flex items-center space-x-2 px-3.5 py-2 rounded-lg text-xs font-bold transition ${
-                    isActive
-                      ? "bg-blue-600 text-white shadow-sm"
-                      : "text-slate-200 hover:text-white hover:bg-slate-800"
-                  }`}
-                >
-                  <Icon className={`w-4 h-4 ${isActive ? "text-white" : "text-cyan-400"}`} />
-                  <span>{item.label}</span>
-                </Link>
-              );
-            })}
-          </nav>
-        </div>
-
-        {/* Right: User Profile & Actions */}
-        <div className="flex items-center space-x-3">
-          {/* Active Role Badge */}
-          <div className="hidden lg:flex items-center space-x-1.5 px-3 py-1 rounded-full text-xs font-mono font-bold bg-slate-800 text-cyan-300 border border-slate-700 shadow-xs">
-            {getRoleIcon()}
-            <span>{user.role.replace("_", " ")}</span>
+        <div className="flex min-w-0 items-center gap-2 sm:gap-3">
+          <div className="hidden items-center gap-1.5 rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-medium text-slate-700 md:flex">
+            {roleIcon}
+            <span>{roleLabels[user.role] || "Usuario"}</span>
           </div>
-
-          {/* User Profile Card */}
-          <div className="flex items-center space-x-2.5 bg-slate-800 px-3 py-1.5 rounded-lg border border-slate-700 shadow-xs">
-            <div className="w-7 h-7 rounded-md bg-blue-600 flex items-center justify-center text-white font-bold text-xs shadow-xs">
-              {user.displayName?.charAt(0) || "U"}
+          <div className="flex min-w-0 items-center gap-2 rounded-full border border-slate-200 bg-white py-1 pl-1 pr-2 sm:gap-2.5 sm:pr-3">
+            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-blue-600 text-sm font-semibold text-white shadow-sm">
+              {(user.displayName || user.email || "U").charAt(0).toUpperCase()}
             </div>
-            <div className="hidden sm:flex flex-col text-left">
-              <span className="text-xs font-bold text-slate-100 leading-tight">
-                {user.displayName}
-              </span>
-              <span className="text-[10px] text-slate-300 font-medium">
-                {user.cargo}
-              </span>
+            <div className="hidden min-w-0 sm:block">
+              <p className="max-w-40 truncate text-xs font-semibold text-slate-900">{user.displayName || user.email}</p>
+              <p className="max-w-40 truncate text-[11px] text-slate-500">{user.cargo || roleLabels[user.role]}</p>
             </div>
           </div>
-
-          {/* Logout Button */}
           <button
             onClick={logout}
-            className="p-2 text-slate-300 hover:text-rose-300 hover:bg-rose-950/40 rounded-lg transition"
-            title="Cerrar Sesión"
+            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-600 transition-colors hover:border-rose-200 hover:bg-rose-50 hover:text-rose-700"
+            title="Cerrar sesión"
+            aria-label="Cerrar sesión"
           >
-            <LogOut className="w-4 h-4" />
+            <LogOut className="h-4 w-4" />
           </button>
         </div>
-
       </div>
+
+      <nav aria-label="Navegación principal" className="app-main-nav mx-auto flex max-w-[1440px] gap-1 overflow-x-auto px-3 pb-2 sm:px-6 lg:px-8">
+        {navItems.map((item) => {
+          const Icon = item.icon;
+          const isActive = item.href === "/dashboard"
+            ? pathname === item.href
+            : pathname === item.href || pathname.startsWith(`${item.href}/`);
+          return (
+            <Link
+              key={item.href}
+              href={item.href}
+              aria-current={isActive ? "page" : undefined}
+              className={`flex min-h-9 shrink-0 items-center gap-2 rounded-xl px-3 text-xs font-medium transition-colors ${
+                isActive
+                  ? "bg-blue-50 text-blue-700"
+                  : "text-slate-600 hover:bg-slate-100 hover:text-slate-900"
+              }`}
+            >
+              <Icon className="h-4 w-4" />
+              <span>{item.label}</span>
+            </Link>
+          );
+        })}
+      </nav>
     </header>
   );
 };

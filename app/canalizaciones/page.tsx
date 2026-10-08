@@ -104,7 +104,7 @@ export default function CanalizacionesPage() {
             </p>
           </div>
 
-          <div className="flex items-center space-x-3">
+          {user.role !== "DIRECTIVO" && <div className="flex items-center space-x-3">
             <button
               onClick={() => setIsModalOpen(true)}
               className="px-4 py-2.5 bg-sky-600 hover:bg-sky-700 text-white rounded-xl text-xs font-bold shadow-sm transition flex items-center space-x-2 cursor-pointer"
@@ -112,7 +112,7 @@ export default function CanalizacionesPage() {
               <Plus className="w-4 h-4" />
               <span>+ Nueva Canalización Externa</span>
             </button>
-          </div>
+          </div>}
         </div>
 
         {/* Executive Summary Cards */}
@@ -230,6 +230,7 @@ export default function CanalizacionesPage() {
                         <select
                           value={c.estatus}
                           onChange={(e) => handleStatusChange(c.id, e.target.value as EstatusCanalizacion)}
+                          disabled={user.role === "DIRECTIVO"}
                           className={`text-[10px] font-bold px-2 py-1 rounded-lg border cursor-pointer ${getStatusBadge(c.estatus)}`}
                         >
                           <option value="PENDIENTE">PENDIENTE</option>

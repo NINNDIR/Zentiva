@@ -7,12 +7,14 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
+    "set-role": "node scripts/set-user-role.cjs",
     "clean": "node -e \"const fs=require('fs');fs.rmSync('.next',{recursive:true,force:true});console.log('.next purgado exitosamente');\""
   },
   "dependencies": {
     "clsx": "^2.1.1",
     "cookies-next": "^5.1.0",
     "firebase": "^11.4.0",
+    "firebase-admin": "^14.5.0",
     "js-cookie": "^3.0.5",
     "lucide-react": "^0.475.0",
     "next": "^16.3.5",

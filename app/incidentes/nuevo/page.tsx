@@ -27,6 +27,8 @@ export default function NuevoIncidentePage() {
   const [categoria, setCategoria] = useState("DISCIPLINARIA");
   const [faltaNombre, setFaltaNombre] = useState("");
   const [descripcionHechos, setDescripcionHechos] = useState("");
+  const [personalInvolucradoTexto, setPersonalInvolucradoTexto] = useState("");
+  const [materia, setMateria] = useState("");
 
   const [diasSuspension, setDiasSuspension] = useState(0);
   const [fechaFinSuspension, setFechaFinSuspension] = useState("");
@@ -133,6 +135,8 @@ export default function NuevoIncidentePage() {
         categoria,
         severidad,
         implicados,
+        personal_involucrado: personalInvolucradoTexto.split(",").map((nombre) => nombre.trim()).filter(Boolean),
+        materia: materia.trim(),
         descripcion_hechos: descripcionHechos.trim(),
         estatus: "ABIERTO",
         dias_suspension: Number(diasSuspension),
@@ -158,6 +162,11 @@ export default function NuevoIncidentePage() {
 
   if (loading) {
     return <div className="p-8 text-center text-xs text-slate-400">Cargando formulario...</div>;
+  }
+
+  if (!user) return null;
+  if (user.role === "DIRECTIVO") {
+    return <div className="m-8 rounded-xl border border-amber-200 bg-amber-50 p-6 text-sm font-semibold text-amber-900">Tu rol tiene acceso de consulta. No puedes registrar incidentes.</div>;
   }
 
   return (
@@ -330,6 +339,18 @@ export default function NuevoIncidentePage() {
                   </div>
                 </div>
               ))}
+            </div>
+          </div>
+
+          {/* Personal responsable para auditoría de patrones */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-4 border-t border-slate-100">
+            <div>
+              <label className="text-xs font-bold text-slate-800 uppercase block mb-1">Docentes / prefectos involucrados</label>
+              <input value={personalInvolucradoTexto} onChange={(e) => setPersonalInvolucradoTexto(e.target.value)} placeholder="Nombres separados por coma" className="w-full text-xs p-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-cyan-500" />
+            </div>
+            <div>
+              <label className="text-xs font-bold text-slate-800 uppercase block mb-1">Materia / área</label>
+              <input value={materia} onChange={(e) => setMateria(e.target.value)} placeholder="Materia, patio, pasillo…" className="w-full text-xs p-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-cyan-500" />
             </div>
           </div>
 

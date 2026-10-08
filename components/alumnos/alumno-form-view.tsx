@@ -102,7 +102,7 @@ export const AlumnoFormView: React.FC<Props> = ({
           <div className="space-y-1 text-xs">
             <div className="flex justify-between">
               <span className="text-slate-500 font-mono">Edad Calculada:</span>
-              <strong className="text-slate-900">{edadCalculada} años</strong>
+              <strong className="text-slate-900">{edadCalculada === null ? "Sin fecha válida" : `${edadCalculada} años`}</strong>
             </div>
             <div className="flex justify-between">
               <span className="text-slate-500 font-mono">Sexo:</span>

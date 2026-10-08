@@ -1,17 +1,16 @@
 "use client";
 
 import React, { createContext, useContext, useEffect, useState } from "react";
-import { UserRole, UserProfile, DEMO_USERS, OFFICIAL_PLANTEL } from "./types";
+import { UserRole, UserProfile } from "./types";
 import { auth } from "./firebase";
-import { signInWithEmailAndPassword, signOut } from "firebase/auth";
-import { getOrSeedUserProfile } from "./firestore-service";
+import { onAuthStateChanged, signInWithEmailAndPassword, signOut } from "firebase/auth";
+import { getUserProfile } from "./firestore-service";
 import Cookies from "js-cookie";
 import { useRouter } from "next/navigation";
 
 interface AuthContextType {
   user: UserProfile | null;
   loading: boolean;
-  loginWithDemoRole: (role: UserRole) => Promise<void>;
   loginWithEmail: (email: string, pass: string) => Promise<boolean>;
   logout: () => void;
 }
@@ -19,12 +18,27 @@ interface AuthContextType {
 const AuthContext = createContext<AuthContextType>({
   user: null,
   loading: true,
-  loginWithDemoRole: async () => {},
   loginWithEmail: async () => false,
   logout: () => {},
 });
 
 const COOKIE_NAME = "zentiva_session";
+const ROLES: UserRole[] = ["SUPER_USUARIO", "TRABAJADORA_SOCIAL", "DIRECTIVO"];
+
+function roleFromClaims(value: unknown): UserRole | null {
+  return typeof value === "string" && ROLES.includes(value as UserRole)
+    ? (value as UserRole)
+    : null;
+}
+
+function clearClientCache() {
+  if (typeof window === "undefined") return;
+  for (const storage of [window.sessionStorage, window.localStorage]) {
+    for (const key of Object.keys(storage)) {
+      if (key.startsWith("zentiva_")) storage.removeItem(key);
+    }
+  }
+}
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<UserProfile | null>(null);
@@ -32,119 +46,89 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const router = useRouter();
 
   useEffect(() => {
-    // Restore session from cookie on mount
-    const savedSession = Cookies.get(COOKIE_NAME);
-    if (savedSession) {
-      try {
-        const parsed: UserProfile = JSON.parse(savedSession);
-        setUser(parsed);
-      } catch (err) {
-        console.error("Error parsing saved session", err);
-        Cookies.remove(COOKIE_NAME);
+    return onAuthStateChanged(auth, async (firebaseUser) => {
+      if (!firebaseUser) {
+        setUser(null);
+        clearClientCache();
+        Cookies.remove(COOKIE_NAME, { path: "/" });
+        setLoading(false);
+        return;
       }
-    }
-    setLoading(false);
+
+      try {
+        const token = await firebaseUser.getIdTokenResult();
+        const role = roleFromClaims(token.claims.role);
+        if (!role) {
+          await signOut(auth);
+          setUser(null);
+          Cookies.remove(COOKIE_NAME, { path: "/" });
+          setLoading(false);
+          return;
+        }
+
+        const profile = await getUserProfile(firebaseUser.uid, firebaseUser.email || "");
+        const trustedProfile: UserProfile = { ...profile, role, uid: firebaseUser.uid };
+        setUser(trustedProfile);
+        // This cookie is only an optimistic page redirect hint. Firestore rules
+        // authorize every read/write using the signed Firebase token claims.
+        Cookies.set(COOKIE_NAME, "1", { expires: 1, sameSite: "Lax", path: "/" });
+      } catch (error) {
+        console.error("Could not load the authenticated user profile:", error);
+        await signOut(auth).catch(() => {});
+        setUser(null);
+        clearClientCache();
+        Cookies.remove(COOKIE_NAME, { path: "/" });
+      } finally {
+        setLoading(false);
+      }
+    });
   }, []);
-
-  const saveUserSession = (profile: UserProfile) => {
-    setUser(profile);
-    Cookies.set(COOKIE_NAME, JSON.stringify(profile), { expires: 7, path: "/" });
-  };
-
-  const loginWithDemoRole = async (role: UserRole) => {
-    setLoading(true);
-    const demo = DEMO_USERS[role];
-    const profile: UserProfile = {
-      uid: `demo-${role.toLowerCase()}`,
-      email: demo.email,
-      displayName: demo.name,
-      role: demo.role,
-      cargo: demo.cargo,
-      plantel: OFFICIAL_PLANTEL,
-    };
-    saveUserSession(profile);
-    setLoading(false);
-    router.push("/dashboard");
-  };
 
   const loginWithEmail = async (email: string, pass: string): Promise<boolean> => {
     setLoading(true);
-
     try {
-      // 1. REAL FIREBASE AUTHENTICATION
-      if (auth && process.env.NEXT_PUBLIC_FIREBASE_API_KEY && process.env.NEXT_PUBLIC_FIREBASE_API_KEY !== "demo-api-key-zentiva") {
-        const userCredential = await signInWithEmailAndPassword(auth, email.trim(), pass);
-        const firebaseUser = userCredential.user;
-
-        // 2. Fetch User Profile Document from Firestore `usuarios`
-        const profile = await getOrSeedUserProfile(firebaseUser.uid, firebaseUser.email || email);
-        saveUserSession(profile);
-        setLoading(false);
-        router.push("/dashboard");
-        return true;
+      const credential = await signInWithEmailAndPassword(auth, email.trim(), pass);
+      const token = await credential.user.getIdTokenResult(true);
+      const role = roleFromClaims(token.claims.role);
+      if (!role) {
+        await signOut(auth);
+        throw new Error("La cuenta aún no tiene un rol institucional asignado por el administrador.");
       }
-    } catch (err: any) {
-      console.error("Firebase auth error:", err);
+
+      const profile = await getUserProfile(credential.user.uid, credential.user.email || email);
+      const trustedProfile: UserProfile = { ...profile, role, uid: credential.user.uid };
+      setUser(trustedProfile);
+      Cookies.set(COOKIE_NAME, "1", { expires: 1, sameSite: "Lax", path: "/" });
+      router.push("/dashboard");
+      return true;
+    } catch (error: any) {
+      console.error("Firebase sign-in failed:", error);
+      if (auth.currentUser) await signOut(auth).catch(() => {});
+      if (error.code === "auth/wrong-password" || error.code === "auth/invalid-credential") {
+        throw new Error("Credenciales no válidas. Verifica tu correo y contraseña.");
+      }
+      if (error.code === "auth/user-not-found") {
+        throw new Error("El correo no está registrado en Firebase Authentication.");
+      }
+      if (error.code === "auth/too-many-requests") {
+        throw new Error("Demasiados intentos fallidos. Intenta más tarde.");
+      }
+      throw error;
+    } finally {
       setLoading(false);
-
-      let errorMsg = "Credenciales no válidas en Firebase. Verifica tu correo y contraseña.";
-      if (err.code === "auth/wrong-password" || err.code === "auth/invalid-credential") {
-        errorMsg = "Contraseña de Firebase incorrecta. Verifica tus datos de acceso.";
-      } else if (err.code === "auth/user-not-found") {
-        errorMsg = "El correo no se encuentra registrado en la consola de Firebase.";
-      } else if (err.code === "auth/too-many-requests") {
-        errorMsg = "Demasiados intentos fallidos. Intenta más tarde.";
-      }
-
-      throw new Error(errorMsg);
     }
-
-    // Fallback mode if Firebase Auth not initialized
-    let matchedRole: UserRole = "TRABAJADORA_SOCIAL";
-    let displayName = "María de Jesús Michaus Rocha";
-    if (email.includes("admin") || email.includes("su")) {
-      matchedRole = "SUPER_USUARIO";
-      displayName = "Ing. Carlos Mendoza (SU)";
-    } else if (email.includes("dir") || email.includes("director")) {
-      matchedRole = "DIRECTIVO";
-      displayName = "Mtro. Roberto Hernández";
-    }
-
-    const demo = DEMO_USERS[matchedRole];
-    const profile: UserProfile = {
-      uid: `usr-${Date.now()}`,
-      email,
-      displayName,
-      role: matchedRole,
-      cargo: demo.cargo,
-      plantel: OFFICIAL_PLANTEL,
-    };
-
-    saveUserSession(profile);
-    setLoading(false);
-    router.push("/dashboard");
-    return true;
   };
 
   const logout = () => {
-    if (auth) {
-      signOut(auth).catch(() => {});
-    }
     setUser(null);
-    Cookies.remove(COOKIE_NAME);
+    clearClientCache();
+    Cookies.remove(COOKIE_NAME, { path: "/" });
+    signOut(auth).catch((error) => console.error("Firebase sign-out failed:", error));
     router.push("/login");
   };
 
   return (
-    <AuthContext.Provider
-      value={{
-        user,
-        loading,
-        loginWithDemoRole,
-        loginWithEmail,
-        logout,
-      }}
-    >
+    <AuthContext.Provider value={{ user, loading, loginWithEmail, logout }}>
       {children}
     </AuthContext.Provider>
   );

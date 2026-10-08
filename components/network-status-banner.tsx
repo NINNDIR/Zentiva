@@ -32,7 +32,7 @@ export const NetworkStatusBanner: React.FC = () => {
         <WifiOff className="w-3.5 h-3.5" />
       </div>
       <span>
-        ⚠️ Sin conexión a la red o Firebase. Zentiva está operando en modo local fuera de línea. Los datos se respaldan localmente y se sincronizarán al restablecer la conexión.
+        ⚠️ Sin conexión. Los cambios no se confirmarán hasta que Firebase responda. Restablece la red y vuelve a intentar cualquier registro pendiente.
       </span>
       <button
         onClick={() => window.location.reload()}

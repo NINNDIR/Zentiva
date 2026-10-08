@@ -20,9 +20,7 @@ import {
   ColoniaCatalog,
   NotaConfidencial,
   UserProfile,
-  UserRole,
   EventoTimeline,
-  OFFICIAL_PLANTEL,
   FaltaCatalog,
   Incidente,
   AnexoComentario,
@@ -35,7 +33,7 @@ import {
   EstatusCanalizacion,
   InstitucionCanalizacionCatalog,
 } from "./types";
-import { INITIAL_ALUMNOS, INITIAL_COLONIAS, INITIAL_NOTAS, INITIAL_EVENTS, INITIAL_FALTAS, INITIAL_INCIDENTES, INITIAL_EVENTOS_RAPIDOS } from "./mock-data";
+import { INITIAL_FALTAS } from "./mock-data";
 
 // Helper function: Sanitiza cualquier objeto convirtiendo valores `undefined` o `NaN` a cadenas vacías "" para Firestore
 export function sanitizeForFirestore<T>(data: T): T {
@@ -50,7 +48,7 @@ export function sanitizeForFirestore<T>(data: T): T {
   );
 }
 
-// Local Storage cache keys
+// Session-only cache keys; school records are not persisted across browser tabs.
 const STORAGE_KEY_ALUMNOS = "zentiva_alumnos_v5";
 const STORAGE_KEY_COLONIAS = "zentiva_colonias_v5";
 const STORAGE_KEY_NOTAS = "zentiva_notas_v5";
@@ -59,7 +57,7 @@ const STORAGE_KEY_EVENTS = "zentiva_events_v5";
 const getLocal = <T>(key: string, defaultVal: T): T => {
   if (typeof window === "undefined") return defaultVal;
   try {
-    const item = localStorage.getItem(key);
+    const item = sessionStorage.getItem(key);
     return item ? JSON.parse(item) : defaultVal;
   } catch (err) {
     return defaultVal;
@@ -69,70 +67,23 @@ const getLocal = <T>(key: string, defaultVal: T): T => {
 const setLocal = <T>(key: string, val: T): void => {
   if (typeof window === "undefined") return;
   try {
-    localStorage.setItem(key, JSON.stringify(val));
+    sessionStorage.setItem(key, JSON.stringify(val));
   } catch (err) {
     console.error("Local storage error:", err);
   }
 };
 
 // ---------------- USUARIOS EN FIRESTORE ----------------
-export async function getOrSeedUserProfile(uid: string, email: string): Promise<UserProfile> {
+export async function getUserProfile(uid: string, email: string): Promise<UserProfile> {
   const normalizedEmail = email.toLowerCase().trim();
-
-  try {
-    if (db && process.env.NEXT_PUBLIC_FIREBASE_API_KEY && process.env.NEXT_PUBLIC_FIREBASE_API_KEY !== "demo-api-key-zentiva") {
-      const userDocRef = doc(db, "usuarios", uid);
-      const userSnap = await getDoc(userDocRef);
-      if (userSnap.exists()) {
-        return userSnap.data() as UserProfile;
-      }
-
-      const q = query(collection(db, "usuarios"), where("email", "==", normalizedEmail));
-      const querySnap = await getDocs(q);
-      if (!querySnap.empty) {
-        return querySnap.docs[0].data() as UserProfile;
-      }
-    }
-  } catch (err) {
-    console.warn("Firestore user profile query fallback:", err);
+  if (!db || !process.env.NEXT_PUBLIC_FIREBASE_API_KEY || process.env.NEXT_PUBLIC_FIREBASE_API_KEY === "demo-api-key-zentiva") {
+    throw new Error("Firebase no está configurado.");
   }
-
-  let role: UserRole = "TRABAJADORA_SOCIAL";
-  let displayName = normalizedEmail.split("@")[0].toUpperCase();
-  let cargo = "Trabajadora Social Principal";
-
-  if (normalizedEmail.includes("michausrochamariadejesus") || normalizedEmail.includes("michaus")) {
-    role = "TRABAJADORA_SOCIAL";
-    displayName = "María de Jesús Michaus Rocha";
-    cargo = "Trabajadora Social Principal";
-  } else if (normalizedEmail.includes("admin") || normalizedEmail.includes("su")) {
-    role = "SUPER_USUARIO";
-    displayName = "Ing. Carlos Mendoza (SU)";
-    cargo = "Administrador de Sistema Escolar";
-  } else if (normalizedEmail.includes("directivo") || normalizedEmail.includes("director")) {
-    role = "DIRECTIVO";
-    displayName = "Mtro. Roberto Hernández";
-    cargo = "Director Escolar";
-  }
-
-  const newProfile: UserProfile = sanitizeForFirestore({
-    uid,
-    email: normalizedEmail,
-    displayName,
-    role,
-    cargo,
-    plantel: OFFICIAL_PLANTEL,
-  });
-
-  try {
-    if (db && process.env.NEXT_PUBLIC_FIREBASE_API_KEY && process.env.NEXT_PUBLIC_FIREBASE_API_KEY !== "demo-api-key-zentiva") {
-      await setDoc(doc(db, "usuarios", uid), newProfile);
-    }
-  } catch (e) {
-    console.warn("Could not seed user doc to Firestore:", e);
-  }
-
-  return newProfile;
+  const userSnap = await getDoc(doc(db, "usuarios", uid));
+  if (!userSnap.exists()) throw new Error("La cuenta no tiene perfil institucional asignado.");
+  const profile = userSnap.data() as UserProfile;
+  if (profile.email?.toLowerCase() !== normalizedEmail) throw new Error("El perfil institucional no coincide con la cuenta autenticada.");
+  return profile;
 }
 
 // ---------------- ALUMNOS (FIRESTORE REAL EN TIEMPO REAL) ----------------
@@ -161,17 +112,13 @@ export function subscribeAlumnos(
             setLocal(STORAGE_KEY_ALUMNOS, list);
             onUpdate(list);
           } else {
-            // Si la colección está vacía en Firestore, sembrar datos iniciales
-            seedAlumnosIfEmpty();
-            const cached = getLocal<Alumno[]>(STORAGE_KEY_ALUMNOS, INITIAL_ALUMNOS);
-            onUpdate(cached);
+            setLocal(STORAGE_KEY_ALUMNOS, []);
+            onUpdate([]);
           }
         },
         (err) => {
-          console.warn("Firestore subscribeAlumnos error, usando caché local:", err);
+          console.warn("Firestore subscribeAlumnos error:", err);
           if (onError) onError(err);
-          const cached = getLocal<Alumno[]>(STORAGE_KEY_ALUMNOS, INITIAL_ALUMNOS);
-          onUpdate(cached);
         }
       );
       return unsubscribe;
@@ -181,7 +128,7 @@ export function subscribeAlumnos(
     }
   }
 
-  const cached = getLocal<Alumno[]>(STORAGE_KEY_ALUMNOS, INITIAL_ALUMNOS);
+  const cached = getLocal<Alumno[]>(STORAGE_KEY_ALUMNOS, []);
   onUpdate(cached);
   return () => {};
 }
@@ -196,19 +143,16 @@ export async function getAlumnos(): Promise<Alumno[]> {
           if ("edad" in data) delete data.edad;
           return data as Alumno;
         });
-      } else {
-        await seedAlumnosIfEmpty();
       }
+      setLocal(STORAGE_KEY_ALUMNOS, []);
+      return [];
     }
   } catch (err) {
-    console.warn("Firestore fetch alumnos fallback to local/mock:", err);
+    console.error("Firestore fetch alumnos failed:", err);
+    throw err;
   }
 
-  const cached = getLocal<Alumno[]>(STORAGE_KEY_ALUMNOS, INITIAL_ALUMNOS);
-  if (!localStorage.getItem(STORAGE_KEY_ALUMNOS)) {
-    setLocal(STORAGE_KEY_ALUMNOS, INITIAL_ALUMNOS);
-  }
-  return cached;
+  return getLocal<Alumno[]>(STORAGE_KEY_ALUMNOS, []);
 }
 
 export async function getAlumnoByMatricula(matricula: string): Promise<Alumno | null> {
@@ -229,22 +173,21 @@ export async function saveAlumno(alumno: Alumno): Promise<void> {
       // 1. Guardar documento del alumno con Document ID fijado a su Matrícula
       await setDoc(doc(db, "alumnos", cleanAlumno.matricula), cleanAlumno, { merge: true });
       
-      // 2. Si la colonia es nueva / pendiente de revisión, guardarla en cat_colonias para el SysAdmin
-      if (cleanAlumno.domicilio?.colonia) {
+      // Queue only unlisted colonies for Super Usuario review. Do not attempt
+      // to rewrite approved catalog entries from the operational client.
+      if (cleanAlumno.domicilio?.colonia && (cleanAlumno.domicilio.colonia_otro || cleanAlumno.domicilio.colonia_pendiente_revision)) {
         const colName = cleanAlumno.domicilio.colonia.toUpperCase().trim();
         const colId = `col_${colName.toLowerCase().replace(/[^a-z0-9]/g, "_")}`;
-        const isOtro = !!cleanAlumno.domicilio.colonia_otro;
-        const isPendiente = !!cleanAlumno.domicilio.colonia_pendiente_revision;
-
         const cleanCol = sanitizeForFirestore<ColoniaCatalog>({
           id: colId,
           nombre: colName,
           activa: true,
-          pendiente_revision: isPendiente || isOtro,
-          creada_por_usuario: isOtro,
+          pendiente_revision: true,
+          creada_por_usuario: true,
         });
-
-        await setDoc(doc(db, "cat_colonias", colId), cleanCol, { merge: true });
+        const coloniaRef = doc(db, "cat_colonias", colId);
+        const existingColonia = await getDoc(coloniaRef);
+        if (!existingColonia.exists()) await setDoc(coloniaRef, cleanCol);
       }
 
       console.log(`[Zentiva Firestore] Alumno ${cleanAlumno.matricula} guardado correctamente en tiempo real.`);
@@ -310,30 +253,40 @@ export async function bulkImportAlumnos(
 
   if (db && process.env.NEXT_PUBLIC_FIREBASE_API_KEY && process.env.NEXT_PUBLIC_FIREBASE_API_KEY !== "demo-api-key-zentiva") {
     try {
-      const batch = writeBatch(db);
-
-      // 1. SetDoc with merge = true for each student with ID = matricula
+      const writes: Array<{ ref: ReturnType<typeof doc>; data: any; merge?: boolean }> = [];
       for (const alumno of cleanAlumnos) {
         const ref = doc(db, "alumnos", alumno.matricula);
-        batch.set(ref, alumno, { merge: true });
+        writes.push({ ref, data: alumno, merge: true });
       }
 
-      // 2. SetDoc with merge = true for unique colonias in cat_colonias
+      // Unlisted colonies go to the review queue; approved catalog rows remain
+      // writable only by the Super Usuario.
       for (const colName of coloniasUnicas) {
         const norm = colName.toUpperCase().trim();
         const colId = `col_${norm.toLowerCase().replace(/[^a-z0-9]/g, "_")}`;
         const colRef = doc(db, "cat_colonias", colId);
+        const existingColonia = await getDoc(colRef);
+        if (existingColonia.exists()) continue;
         const cleanCol = sanitizeForFirestore<ColoniaCatalog>({
           id: colId,
           nombre: norm,
           activa: true,
-          pendiente_revision: false,
+          pendiente_revision: true,
+          creada_por_usuario: true,
         });
-        batch.set(colRef, cleanCol, { merge: true });
+        writes.push({ ref: colRef, data: cleanCol });
       }
 
-      console.log("[Zentiva Firestore] Ejecutando batch.commit()...");
-      await batch.commit();
+      // Firestore limits each batch to 500 writes. Chunk below that limit so
+      // imports with 600+ students work without losing the final records.
+      for (let offset = 0; offset < writes.length; offset += 400) {
+        const batch = writeBatch(db);
+        for (const write of writes.slice(offset, offset + 400)) {
+          if (write.merge) batch.set(write.ref, write.data, { merge: true });
+          else batch.set(write.ref, write.data);
+        }
+        await batch.commit();
+      }
       console.log("¡Éxito al escribir batch en Firestore!");
     } catch (err: any) {
       console.error("Error al subir a Firestore:", err);
@@ -375,16 +328,13 @@ export function subscribeColonias(
             setLocal(STORAGE_KEY_COLONIAS, list);
             onUpdate(list);
           } else {
-            seedCatColoniasIfEmpty();
-            const cached = getLocal<ColoniaCatalog[]>(STORAGE_KEY_COLONIAS, INITIAL_COLONIAS);
-            onUpdate(cached);
+            setLocal(STORAGE_KEY_COLONIAS, []);
+            onUpdate([]);
           }
         },
         (err) => {
           console.warn("Firestore onSnapshot cat_colonias error:", err);
           if (onError) onError(err);
-          const cached = getLocal<ColoniaCatalog[]>(STORAGE_KEY_COLONIAS, INITIAL_COLONIAS);
-          onUpdate(cached);
         }
       );
       return unsubscribe;
@@ -394,7 +344,7 @@ export function subscribeColonias(
     }
   }
 
-  const cached = getLocal<ColoniaCatalog[]>(STORAGE_KEY_COLONIAS, INITIAL_COLONIAS);
+  const cached = getLocal<ColoniaCatalog[]>(STORAGE_KEY_COLONIAS, []);
   onUpdate(cached);
   return () => {};
 }
@@ -403,60 +353,14 @@ export async function getColonias(): Promise<ColoniaCatalog[]> {
   try {
     if (db && process.env.NEXT_PUBLIC_FIREBASE_API_KEY && process.env.NEXT_PUBLIC_FIREBASE_API_KEY !== "demo-api-key-zentiva") {
       const snap = await getDocs(collection(db, "cat_colonias"));
-      if (!snap.empty) {
-        return snap.docs.map((d) => d.data() as ColoniaCatalog);
-      } else {
-        await seedCatColoniasIfEmpty();
-      }
+      return snap.docs.map((d) => d.data() as ColoniaCatalog);
     }
   } catch (err) {
-    console.warn("Firestore fetch cat_colonias fallback:", err);
+    console.error("Firestore fetch cat_colonias failed:", err);
+    throw err;
   }
 
-  const cached = getLocal<ColoniaCatalog[]>(STORAGE_KEY_COLONIAS, INITIAL_COLONIAS);
-  if (!localStorage.getItem(STORAGE_KEY_COLONIAS)) {
-    setLocal(STORAGE_KEY_COLONIAS, INITIAL_COLONIAS);
-  }
-  return cached;
-}
-
-export async function seedCatColoniasIfEmpty(): Promise<void> {
-  if (!db || !process.env.NEXT_PUBLIC_FIREBASE_API_KEY || process.env.NEXT_PUBLIC_FIREBASE_API_KEY === "demo-api-key-zentiva") return;
-  try {
-    const snap = await getDocs(collection(db, "cat_colonias"));
-    if (snap.empty) {
-      const batch = writeBatch(db);
-      for (const col of INITIAL_COLONIAS) {
-        const docRef = doc(db, "cat_colonias", col.id);
-        const data: ColoniaCatalog = { ...col, activa: true, pendiente_revision: false };
-        batch.set(docRef, sanitizeForFirestore(data));
-      }
-      await batch.commit();
-      console.log("[Zentiva Firestore] cat_colonias sembrada exitosamente.");
-    }
-  } catch (err) {
-    console.warn("No se pudo sembrar cat_colonias:", err);
-  }
-}
-
-export async function seedAlumnosIfEmpty(): Promise<void> {
-  if (!db || !process.env.NEXT_PUBLIC_FIREBASE_API_KEY || process.env.NEXT_PUBLIC_FIREBASE_API_KEY === "demo-api-key-zentiva") return;
-  try {
-    const snap = await getDocs(collection(db, "alumnos"));
-    if (snap.empty) {
-      const batch = writeBatch(db);
-      for (const al of INITIAL_ALUMNOS) {
-        const docRef = doc(db, "alumnos", al.matricula);
-        const clean = sanitizeForFirestore(al);
-        if ("edad" in clean) delete (clean as any).edad;
-        batch.set(docRef, clean);
-      }
-      await batch.commit();
-      console.log("[Zentiva Firestore] Colección alumnos sembrada exitosamente.");
-    }
-  } catch (err) {
-    console.warn("No se pudo sembrar alumnos:", err);
-  }
+  return getLocal<ColoniaCatalog[]>(STORAGE_KEY_COLONIAS, []);
 }
 
 // ---------------- NOTAS CONFIDENCIALES ----------------
@@ -468,15 +372,14 @@ export async function getNotasConfidenciales(matricula: string): Promise<NotaCon
         orderBy("fecha", "desc")
       );
       const snap = await getDocs(q);
-      if (!snap.empty) {
-        return snap.docs.map((d) => ({ id: d.id, ...d.data() }) as NotaConfidencial);
-      }
+      return snap.docs.map((d) => ({ id: d.id, ...d.data() }) as NotaConfidencial);
     }
   } catch (err) {
-    console.warn("Firestore fetch notas fallback:", err);
+    console.error("Firestore fetch notas failed:", err);
+    throw err;
   }
 
-  const cached = getLocal<Record<string, NotaConfidencial[]>>(STORAGE_KEY_NOTAS, INITIAL_NOTAS);
+  const cached = getLocal<Record<string, NotaConfidencial[]>>(STORAGE_KEY_NOTAS, {});
   return cached[matricula] || [];
 }
 
@@ -494,7 +397,7 @@ export async function addNotaConfidencial(nota: Omit<NotaConfidencial, "id">): P
     throw err;
   }
 
-  const cached = getLocal<Record<string, NotaConfidencial[]>>(STORAGE_KEY_NOTAS, INITIAL_NOTAS);
+  const cached = getLocal<Record<string, NotaConfidencial[]>>(STORAGE_KEY_NOTAS, {});
   const list = cached[nota.alumno_matricula] || [];
   list.unshift(fullNota);
   cached[nota.alumno_matricula] = list;
@@ -509,21 +412,22 @@ export async function getEventosTimeline(matricula: string): Promise<EventoTimel
     if (db && process.env.NEXT_PUBLIC_FIREBASE_API_KEY && process.env.NEXT_PUBLIC_FIREBASE_API_KEY !== "demo-api-key-zentiva") {
       const events: EventoTimeline[] = [];
 
-      const qInc = query(
-        collection(db, "incidentes"),
-        where("alumno_matricula", "==", matricula)
-      );
+      const qInc = collection(db, "incidentes");
       const snapInc = await getDocs(qInc);
       snapInc.forEach((docSnap) => {
         const d = docSnap.data();
+        const implicado = Array.isArray(d.implicados)
+          ? d.implicados.find((item: any) => item.alumno_matricula === matricula)
+          : null;
+        if (!implicado) return;
         events.push({
           id: docSnap.id,
           alumno_matricula: matricula,
           fecha: d.fecha || d.creado_el || "Fecha N/A",
           tipo: "INCIDENTE_GRAVE",
-          titulo: d.titulo || `Incidente: ${d.falta || "Reporte Disciplinario"}`,
-          descripcion: d.descripcion || d.hechos || "Sin detalle",
-          autor: d.autor || "Trabajo Social",
+          titulo: d.titulo || `Incidente: ${d.falta_nombre || "Reporte Disciplinario"}`,
+          descripcion: d.descripcion || d.descripcion_hechos || "Sin detalle",
+          autor: d.autor || d.creado_por_nombre || "Trabajo Social",
         });
       });
 
@@ -599,15 +503,14 @@ export async function getEventosTimeline(matricula: string): Promise<EventoTimel
         });
       });
 
-      if (events.length > 0) {
-        return events.sort((a, b) => b.fecha.localeCompare(a.fecha));
-      }
+      return events.sort((a, b) => b.fecha.localeCompare(a.fecha));
     }
   } catch (err) {
-    console.warn("Firestore fetch events fallback:", err);
+    console.error("Firestore fetch events failed:", err);
+    throw err;
   }
 
-  const cachedEvents = getLocal<EventoTimeline[]>(STORAGE_KEY_EVENTS, INITIAL_EVENTS).filter(
+  const cachedEvents = getLocal<EventoTimeline[]>(STORAGE_KEY_EVENTS, []).filter(
     (e) => e.alumno_matricula === matricula
   );
   const cachedRetardos = getLocal<RetardoRecord[]>("zentiva_retardos_v5", []).filter(
@@ -728,16 +631,15 @@ export async function getIncidentes(): Promise<Incidente[]> {
       if (!snap.empty) {
         return snap.docs.map((d) => ({ id: d.id, ...d.data() }) as Incidente);
       }
+      setLocal(STORAGE_KEY_INCIDENTES, []);
+      return [];
     }
   } catch (err) {
-    console.warn("Firestore fetch incidentes fallback:", err);
+    console.error("Firestore fetch incidentes failed:", err);
+    throw err;
   }
 
-  const cached = getLocal<Incidente[]>(STORAGE_KEY_INCIDENTES, INITIAL_INCIDENTES);
-  if (!localStorage.getItem(STORAGE_KEY_INCIDENTES)) {
-    setLocal(STORAGE_KEY_INCIDENTES, INITIAL_INCIDENTES);
-  }
-  return cached;
+  return getLocal<Incidente[]>(STORAGE_KEY_INCIDENTES, []);
 }
 
 export async function getIncidenteById(id: string): Promise<Incidente | null> {
@@ -818,7 +720,8 @@ export async function updateIncidenteWithAudit(
   // Update in Firestore
   try {
     if (db && process.env.NEXT_PUBLIC_FIREBASE_API_KEY && process.env.NEXT_PUBLIC_FIREBASE_API_KEY !== "demo-api-key-zentiva") {
-      await setDoc(doc(db, "incidentes", incidenteId), updatedIncidente, { merge: true });
+      const batch = writeBatch(db);
+      batch.set(doc(db, "incidentes", incidenteId), updatedIncidente, { merge: true });
 
       // If camposModificados > 0, write audit log entry to subcollection auditoria_cambios
       if (camposModificados.length > 0) {
@@ -833,11 +736,13 @@ export async function updateIncidenteWithAudit(
           valor_anterior: valorAnterior,
           valor_nuevo: valorNuevo,
         });
-        await setDoc(auditRef, auditEntry);
+        batch.set(auditRef, auditEntry);
       }
+      await batch.commit();
     }
   } catch (err) {
     console.error("Error al actualizar incidente con auditoría:", err);
+    throw err;
   }
 
   // Update local cache
@@ -948,16 +853,15 @@ export async function getEventosRapidos(): Promise<EventoRapido[]> {
       if (!snap.empty) {
         return snap.docs.map((d) => ({ id: d.id, ...d.data() }) as EventoRapido);
       }
+      setLocal(STORAGE_KEY_EVENTOS_RAPIDOS, []);
+      return [];
     }
   } catch (err) {
-    console.warn("Firestore getEventosRapidos fallback:", err);
+    console.error("Firestore getEventosRapidos failed:", err);
+    throw err;
   }
 
-  const cached = getLocal<EventoRapido[]>(STORAGE_KEY_EVENTOS_RAPIDOS, INITIAL_EVENTOS_RAPIDOS);
-  if (!localStorage.getItem(STORAGE_KEY_EVENTOS_RAPIDOS)) {
-    setLocal(STORAGE_KEY_EVENTOS_RAPIDOS, INITIAL_EVENTOS_RAPIDOS);
-  }
-  return cached;
+  return getLocal<EventoRapido[]>(STORAGE_KEY_EVENTOS_RAPIDOS, []);
 }
 
 export async function addEventoRapido(evento: Omit<EventoRapido, "id">): Promise<EventoRapido> {
@@ -986,12 +890,11 @@ export async function getSalidasExtraordinarias(): Promise<SalidaExtraordinaria[
   try {
     if (db && process.env.NEXT_PUBLIC_FIREBASE_API_KEY && process.env.NEXT_PUBLIC_FIREBASE_API_KEY !== "demo-api-key-zentiva") {
       const snap = await getDocs(collection(db, "salidas_extraordinarias"));
-      if (!snap.empty) {
-        return snap.docs.map((d) => ({ id: d.id, ...d.data() }) as SalidaExtraordinaria);
-      }
+      return snap.docs.map((d) => ({ id: d.id, ...d.data() }) as SalidaExtraordinaria);
     }
   } catch (err) {
-    console.warn("Firestore getSalidasExtraordinarias fallback:", err);
+    console.error("Firestore getSalidasExtraordinarias failed:", err);
+    throw err;
   }
 
   const cached = getLocal<SalidaExtraordinaria[]>(STORAGE_KEY_SALIDAS_EXTRAORDINARIAS, []);
@@ -1010,11 +913,11 @@ export async function addSalidaExtraordinaria(
 
   try {
     if (db && process.env.NEXT_PUBLIC_FIREBASE_API_KEY && process.env.NEXT_PUBLIC_FIREBASE_API_KEY !== "demo-api-key-zentiva") {
-      // 1. Guardar en colección oficial 'salidas_extraordinarias' en Firestore
-      await setDoc(doc(db, "salidas_extraordinarias", id), fullSalida);
+      const batch = writeBatch(db);
+      batch.set(doc(db, "salidas_extraordinarias", id), fullSalida);
 
       // 2. Guardar también en 'eventos_rapidos' para compatibilidad con el dashboard de la app
-      await setDoc(
+      batch.set(
         doc(db, "eventos_rapidos", id),
         sanitizeForFirestore({
           id,
@@ -1032,11 +935,13 @@ export async function addSalidaExtraordinaria(
           registrado_por: salida.registrado_por_nombre,
         })
       );
+      await batch.commit();
 
       console.log(`[Zentiva Firestore] Salida extraordinaria de menor (${id}) registrada exitosamente en Firestore.`);
     }
   } catch (err) {
     console.error("Error al guardar salida extraordinaria en Firestore:", err);
+    throw err;
   }
 
   const list = await getSalidasExtraordinarias();
@@ -1053,12 +958,11 @@ export async function getRetardos(): Promise<RetardoRecord[]> {
   try {
     if (db && process.env.NEXT_PUBLIC_FIREBASE_API_KEY && process.env.NEXT_PUBLIC_FIREBASE_API_KEY !== "demo-api-key-zentiva") {
       const snap = await getDocs(collection(db, "retardos"));
-      if (!snap.empty) {
-        return snap.docs.map((d) => ({ id: d.id, ...d.data() }) as RetardoRecord);
-      }
+      return snap.docs.map((d) => ({ id: d.id, ...d.data() }) as RetardoRecord);
     }
   } catch (err) {
-    console.warn("Firestore getRetardos fallback:", err);
+    console.error("Firestore getRetardos failed:", err);
+    throw err;
   }
 
   const cached = getLocal<RetardoRecord[]>(STORAGE_KEY_RETARDOS, []);
@@ -1075,15 +979,15 @@ export async function addRetardo(retardo: Omit<RetardoRecord, "id">): Promise<Re
 
   try {
     if (db && process.env.NEXT_PUBLIC_FIREBASE_API_KEY && process.env.NEXT_PUBLIC_FIREBASE_API_KEY !== "demo-api-key-zentiva") {
-      // 1. Guardar en colección 'retardos' en Firestore
-      await setDoc(doc(db, "retardos", id), fullRetardo);
+      const batch = writeBatch(db);
+      batch.set(doc(db, "retardos", id), fullRetardo);
 
       // 2. Dual-write en 'eventos_rapidos' para actualizar dashboard global
-      await setDoc(
+      batch.set(
         doc(db, "eventos_rapidos", id),
         sanitizeForFirestore({
           id,
-          tipo: "RETARDO_MASIVO",
+          tipo: "RETARDO_INDIVIDUAL",
           alumno_matricula: retardo.alumno_matricula,
           alumno_nombre: retardo.alumno_nombre,
           grado_grupo: retardo.grado_grupo,
@@ -1092,10 +996,12 @@ export async function addRetardo(retardo: Omit<RetardoRecord, "id">): Promise<Re
           registrado_por: retardo.registrado_por_nombre,
         })
       );
+      await batch.commit();
       console.log(`[Zentiva Firestore] Retardo (${id}) registrado exitosamente.`);
     }
   } catch (err) {
     console.error("Error al guardar retardo en Firestore:", err);
+    throw err;
   }
 
   const list = await getRetardos();
@@ -1114,29 +1020,19 @@ export async function addRetardosMasivos(
   const now = new Date().toISOString();
 
   if (db && process.env.NEXT_PUBLIC_FIREBASE_API_KEY && process.env.NEXT_PUBLIC_FIREBASE_API_KEY !== "demo-api-key-zentiva") {
+    let committedCount = 0;
     try {
-      const batch = writeBatch(db);
-
-      retardosList.forEach((item, index) => {
-        const id = `ret-${Date.now()}-${index}-${Math.floor(Math.random() * 1000)}`;
-        const fullRetardo: RetardoRecord = sanitizeForFirestore({
-          id,
-          creado_el: now,
-          es_masivo: true,
-          ...item,
-        });
-
-        createdRecords.push(fullRetardo);
-
-        // Guardar en 'retardos'
-        const retRef = doc(db, "retardos", id);
-        batch.set(retRef, fullRetardo);
-
-        // Dual-write en 'eventos_rapidos'
-        const evRef = doc(db, "eventos_rapidos", id);
-        batch.set(
-          evRef,
-          sanitizeForFirestore({
+      // Two Firestore writes per student; 200 students keeps each commit below 500.
+      for (let offset = 0; offset < retardosList.length; offset += 200) {
+        const batch = writeBatch(db);
+        const chunk = retardosList.slice(offset, offset + 200);
+        chunk.forEach((item, chunkIndex) => {
+          const index = offset + chunkIndex;
+          const id = `ret-${Date.now()}-${index}-${Math.floor(Math.random() * 1000)}`;
+          const fullRetardo: RetardoRecord = sanitizeForFirestore({ id, creado_el: now, es_masivo: true, ...item });
+          createdRecords.push(fullRetardo);
+          batch.set(doc(db, "retardos", id), fullRetardo);
+          batch.set(doc(db, "eventos_rapidos", id), sanitizeForFirestore({
             id,
             tipo: "RETARDO_MASIVO",
             alumno_matricula: item.alumno_matricula,
@@ -1145,24 +1041,17 @@ export async function addRetardosMasivos(
             fecha_hora: item.fecha_hora,
             motivo: item.motivo,
             registrado_por: item.registrado_por_nombre,
-          })
-        );
-      });
-
-      await batch.commit();
+          }));
+        });
+        await batch.commit();
+        committedCount += chunk.length;
+      }
       console.log(`[Zentiva Firestore] Lote de ${createdRecords.length} retardos registrado exitosamente.`);
     } catch (err) {
       console.error("Error al registrar lote de retardos en Firestore:", err);
-      if (createdRecords.length === 0) {
-        retardosList.forEach((item, index) => {
-          createdRecords.push({
-            id: `ret-${Date.now()}-${index}`,
-            creado_el: now,
-            es_masivo: true,
-            ...item,
-          });
-        });
-      }
+      throw new Error(committedCount > 0
+        ? `Se guardaron ${committedCount} de ${retardosList.length} retardos. Revisa el registro antes de repetir el lote.`
+        : "No se guardó el lote de retardos. Verifica la conexión y vuelve a intentarlo.");
     }
   } else {
     retardosList.forEach((item, index) => {
@@ -1189,12 +1078,11 @@ export async function getJustificantes(): Promise<JustificanteMedico[]> {
   try {
     if (db && process.env.NEXT_PUBLIC_FIREBASE_API_KEY && process.env.NEXT_PUBLIC_FIREBASE_API_KEY !== "demo-api-key-zentiva") {
       const snap = await getDocs(collection(db, "justificantes"));
-      if (!snap.empty) {
-        return snap.docs.map((d) => ({ id: d.id, ...d.data() }) as JustificanteMedico);
-      }
+      return snap.docs.map((d) => ({ id: d.id, ...d.data() }) as JustificanteMedico);
     }
   } catch (err) {
-    console.warn("Firestore getJustificantes fallback:", err);
+    console.error("Firestore getJustificantes failed:", err);
+    throw err;
   }
 
   const cached = getLocal<JustificanteMedico[]>(STORAGE_KEY_JUSTIFICANTES, []);
@@ -1218,6 +1106,7 @@ export async function addJustificante(
     }
   } catch (err) {
     console.error("Error al guardar justificante médico en Firestore:", err);
+    throw err;
   }
 
   const list = await getJustificantes();
@@ -1234,12 +1123,11 @@ export async function getCanalizaciones(): Promise<CanalizacionExterna[]> {
   try {
     if (db && process.env.NEXT_PUBLIC_FIREBASE_API_KEY && process.env.NEXT_PUBLIC_FIREBASE_API_KEY !== "demo-api-key-zentiva") {
       const snap = await getDocs(collection(db, "canalizaciones"));
-      if (!snap.empty) {
-        return snap.docs.map((d) => ({ id: d.id, ...d.data() }) as CanalizacionExterna);
-      }
+      return snap.docs.map((d) => ({ id: d.id, ...d.data() }) as CanalizacionExterna);
     }
   } catch (err) {
-    console.warn("Firestore getCanalizaciones fallback:", err);
+    console.error("Firestore getCanalizaciones failed:", err);
+    throw err;
   }
 
   const cached = getLocal<CanalizacionExterna[]>(STORAGE_KEY_CANALIZACIONES, []);
@@ -1263,6 +1151,7 @@ export async function addCanalizacion(
     }
   } catch (err) {
     console.error("Error al guardar canalización en Firestore:", err);
+    throw err;
   }
 
   const list = await getCanalizaciones();
@@ -1289,6 +1178,7 @@ export async function updateCanalizacionEstatus(
     }
   } catch (err) {
     console.error("Error al actualizar estatus de canalización en Firestore:", err);
+    throw err;
   }
 
   const list = await getCanalizaciones();
@@ -1309,41 +1199,14 @@ export async function getUsers(): Promise<UserProfile[]> {
   try {
     if (db && process.env.NEXT_PUBLIC_FIREBASE_API_KEY && process.env.NEXT_PUBLIC_FIREBASE_API_KEY !== "demo-api-key-zentiva") {
       const snap = await getDocs(collection(db, "usuarios"));
-      if (!snap.empty) {
-        return snap.docs.map((d) => d.data() as UserProfile);
-      }
+      return snap.docs.map((d) => d.data() as UserProfile);
     }
   } catch (err) {
-    console.warn("Firestore getUsers fallback:", err);
+    console.error("Firestore getUsers failed:", err);
+    throw err;
   }
 
-  const cached = getLocal<UserProfile[]>(STORAGE_KEY_USUARIOS, [
-    {
-      uid: "user-su",
-      email: "admin@zentiva.edu.mx",
-      displayName: "Ing. Carlos Mendoza (SU)",
-      role: "SUPER_USUARIO",
-      cargo: "Administrador de Sistema Escolar",
-      plantel: OFFICIAL_PLANTEL,
-    },
-    {
-      uid: "user-ts",
-      email: "michausrochamariadejesus@gmail.com",
-      displayName: "María de Jesús Michaus Rocha",
-      role: "TRABAJADORA_SOCIAL",
-      cargo: "Trabajadora Social Principal",
-      plantel: OFFICIAL_PLANTEL,
-    },
-    {
-      uid: "user-dir",
-      email: "directivo@zentiva.edu.mx",
-      displayName: "Mtro. Roberto Hernández",
-      role: "DIRECTIVO",
-      cargo: "Director Escolar",
-      plantel: OFFICIAL_PLANTEL,
-    },
-  ]);
-  return cached;
+  return getLocal<UserProfile[]>(STORAGE_KEY_USUARIOS, []);
 }
 
 export async function saveUserProfile(profile: UserProfile): Promise<void> {

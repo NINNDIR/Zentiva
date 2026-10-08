@@ -120,6 +120,22 @@ export default function DirectivoDashboardPage() {
 
   const gruposRanking = Array.from(gruposMap.values()).sort((a, b) => b.count - a.count);
 
+  const coloniaIncidentes = new Map<string, Set<string>>();
+  incidentes.forEach((inc) => {
+    const coloniasDelIncidente = new Set<string>();
+    inc.implicados.forEach((imp) => {
+      const colonia = alumnos.find((a) => a.matricula === imp.alumno_matricula)?.domicilio?.colonia?.trim();
+      if (colonia) coloniasDelIncidente.add(colonia);
+    });
+    coloniasDelIncidente.forEach((colonia) => {
+      const ticketIds = coloniaIncidentes.get(colonia) || new Set<string>();
+      ticketIds.add(inc.id);
+      coloniaIncidentes.set(colonia, ticketIds);
+    });
+  });
+  const coloniasRanking = Array.from(coloniaIncidentes, ([colonia, tickets]) => ({ colonia, incidentes: tickets.size }))
+    .sort((a, b) => b.incidentes - a.incidentes);
+
   // ---------------- ANALÍTICA 3: CONCENTRACIÓN DE REPORTES POR PERSONAL ----------------
   const personalMap = new Map<
     string,
@@ -127,17 +143,15 @@ export default function DirectivoDashboardPage() {
   >();
 
   incidentes.forEach((inc) => {
-    const reporter = inc.creado_por_nombre || "Personal No Identificado";
-    const curr = personalMap.get(reporter) || {
-      nombre: reporter,
-      total_reportes: 0,
-      abiertos: 0,
-      cerrados: 0,
-    };
-    curr.total_reportes += 1;
-    if (inc.estatus === "CERRADO") curr.cerrados += 1;
-    else curr.abiertos += 1;
-    personalMap.set(reporter, curr);
+    for (const nombre of inc.personal_involucrado || []) {
+      const key = nombre.trim().toLocaleLowerCase();
+      if (!key) continue;
+      const curr = personalMap.get(key) || { nombre: nombre.trim(), total_reportes: 0, abiertos: 0, cerrados: 0 };
+      curr.total_reportes += 1;
+      if (inc.estatus === "CERRADO") curr.cerrados += 1;
+      else curr.abiertos += 1;
+      personalMap.set(key, curr);
+    }
   });
 
   const personalRanking = Array.from(personalMap.values()).sort(
@@ -151,30 +165,30 @@ export default function DirectivoDashboardPage() {
   const totalCanalizaciones = canalizaciones.length;
 
   return (
-    <div className="min-h-screen bg-slate-100 py-8 px-4 sm:px-6 lg:px-8 font-sans">
-      <div className="max-w-7xl mx-auto space-y-6">
+    <div className="min-h-screen bg-[#EEF2F6] py-8 px-4 sm:px-6 lg:px-8 font-sans">
+      <div className="max-w-[1440px] mx-auto space-y-7">
         
         {/* Header */}
-        <div className="bg-slate-900 text-white p-6 rounded-2xl shadow-md flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div className="bg-white text-slate-900 p-6 sm:p-8 rounded-2xl border border-slate-200/80 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div className="flex items-center space-x-3">
-            <div className="w-12 h-12 rounded-xl bg-amber-500/20 border border-amber-500/30 flex items-center justify-center text-amber-400">
+            <div className="w-12 h-12 rounded-2xl bg-amber-50 border border-amber-200 flex items-center justify-center text-amber-700">
               <BarChart3 className="w-6 h-6" />
             </div>
             <div>
-              <span className="text-xs font-mono font-bold text-amber-400 uppercase tracking-wider block">
+              <span className="text-xs font-semibold text-amber-700 uppercase tracking-wider block">
                 Dirección Escolar & Análisis Ejecutivo
               </span>
-              <h1 className="text-2xl font-black tracking-tight mt-0.5">
+              <h1 className="text-2xl sm:text-3xl font-semibold tracking-tight mt-1">
                 Dashboard Analítico de Directivos
               </h1>
-              <p className="text-xs text-slate-300">
+              <p className="text-sm text-slate-600 mt-1">
                 Secundaria Felipe Carrillo Puerto — Consolidado de reincidencias, clima escolar y personal reportante.
               </p>
             </div>
           </div>
 
           <div className="flex items-center space-x-2">
-            <span className="bg-amber-500/20 text-amber-300 border border-amber-500/30 text-xs font-mono font-bold px-3 py-1.5 rounded-xl">
+            <span className="bg-amber-50 text-amber-800 border border-amber-200 text-xs font-medium px-3 py-1.5 rounded-full">
               Vista Directiva Oficial
             </span>
           </div>
@@ -371,7 +385,26 @@ export default function DirectivoDashboardPage() {
 
         </div>
 
-        {/* SECCIÓN 3: CONCENTRACIÓN DE REPORTES POR PERSONAL */}
+        <div className="bg-white rounded-xl border border-slate-300 shadow-sm p-5 space-y-4">
+          <div className="border-b border-slate-200 pb-3">
+            <h3 className="text-sm font-bold text-slate-900 uppercase tracking-wide">Incidentes por colonia</h3>
+            <p className="text-xs text-slate-600">Distribución de folios según los domicilios de alumnos implicados. Colonias sin domicilio registrado no aparecen.</p>
+          </div>
+          {loading ? <div className="p-4 text-center text-xs text-slate-500">Cargando colonias…</div> : coloniasRanking.length === 0 ? (
+            <div className="p-4 text-center text-xs text-slate-500">No hay incidentes con colonia de residencia disponible.</div>
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+              {coloniasRanking.slice(0, 9).map((item) => (
+                <div key={item.colonia} className="rounded-lg border border-slate-200 bg-slate-50 p-3 flex items-center justify-between gap-3">
+                  <span className="text-xs font-semibold text-slate-800">{item.colonia}</span>
+                  <span className="shrink-0 rounded-full bg-cyan-100 px-2 py-1 text-[11px] font-bold text-cyan-900">{item.incidentes} folios</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* SECCIÓN 3: PERSONAL INVOLUCRADO EN INCIDENTES */}
         <div className="bg-white rounded-xl border border-slate-300 shadow-sm p-6 space-y-4">
           <div className="flex items-center justify-between border-b border-slate-200 pb-3">
             <div className="flex items-center space-x-2">
@@ -380,15 +413,15 @@ export default function DirectivoDashboardPage() {
               </div>
               <div>
                 <h3 className="text-sm font-bold text-slate-900 uppercase tracking-wide">
-                  Concentración de Reportes por Personal Reportante (Docentes & Prefectura)
+                  Incidentes por Docente / Prefecto Involucrado
                 </h3>
                 <p className="text-xs text-slate-600">
-                  Volumen de folios emitidos por cada miembro del personal educativo a su cargo.
+                  Conteo de incidentes donde el personal fue registrado como involucrado.
                 </p>
               </div>
             </div>
             <span className="text-xs font-bold text-blue-700 bg-blue-50 px-3 py-1 rounded-lg border border-blue-200 font-mono">
-              {personalRanking.length} Reportantes
+              {personalRanking.length} personas
             </span>
           </div>
 
@@ -396,7 +429,7 @@ export default function DirectivoDashboardPage() {
             <div className="p-6 text-center text-xs text-slate-500">Cargando personal reportante...</div>
           ) : personalRanking.length === 0 ? (
             <div className="p-6 text-center text-xs text-slate-500 italic">
-              No hay reportes asignados a personal reportante.
+              No hay incidentes con docentes o prefectos relacionados.
             </div>
           ) : (
             <div className="overflow-x-auto border border-slate-200 rounded-xl">
@@ -404,7 +437,7 @@ export default function DirectivoDashboardPage() {
                 <thead>
                   <tr className="bg-slate-50 text-slate-700 font-bold uppercase border-b border-slate-200">
                     <th className="py-3 px-5">Nombre del Personal</th>
-                    <th className="py-3 px-5 text-center">Total Reportes Emitidos</th>
+                    <th className="py-3 px-5 text-center">Incidentes Relacionados</th>
                     <th className="py-3 px-5 text-center">Tickets Abiertos</th>
                     <th className="py-3 px-5 text-center">Tickets Concluidos</th>
                     <th className="py-3 px-5 text-right">% Participación del Total</th>

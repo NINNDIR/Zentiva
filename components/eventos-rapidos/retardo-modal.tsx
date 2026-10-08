@@ -166,7 +166,7 @@ export const RetardoModal: React.FC<Props> = ({
       }, 1200);
     } catch (err: any) {
       console.error("Error al registrar retardos masivos:", err);
-      setError("Ocurrió un error al guardar los retardos en Firestore.");
+      setError(err.message || "Ocurrió un error al guardar los retardos en Firestore.");
     } finally {
       setSaving(false);
     }
@@ -210,7 +210,7 @@ export const RetardoModal: React.FC<Props> = ({
       }, 1200);
     } catch (err: any) {
       console.error("Error al registrar retardo individual:", err);
-      setError("Ocurrió un error al guardar el retardo en Firestore.");
+      setError(err.message || "Ocurrió un error al guardar el retardo en Firestore.");
     } finally {
       setSaving(false);
     }

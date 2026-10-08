@@ -1,109 +1,103 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-
-    // Helper functions for Role Verification
-    function isAuthenticated() {
-      return request.auth != null;
+    function signedIn() { return request.auth != null; }
+    function role() { return signedIn() ? request.auth.token.role : null; }
+    function hasValidRole() {
+      return role() in ['SUPER_USUARIO', 'TRABAJADORA_SOCIAL', 'DIRECTIVO'];
     }
-
-    function getUserData() {
-      return get(/databases/$(database)/documents/usuarios/$(request.auth.uid)).data;
-    }
-
-    function isSuperUsuario() {
-      return isAuthenticated() && (
-        getUserData().role == 'SUPER_USUARIO' ||
-        request.auth.token.email == 'admin@zentiva.edu.mx'
-      );
-    }
-
+    function isSuperUsuario() { return hasValidRole() && role() == 'SUPER_USUARIO'; }
     function isTrabajadoraSocial() {
-      return isAuthenticated() && (
-        getUserData().role == 'TRABAJADORA_SOCIAL' ||
-        isSuperUsuario()
-      );
+      return hasValidRole() && role() in ['TRABAJADORA_SOCIAL', 'SUPER_USUARIO'];
     }
+    function canReadSchoolData() { return hasValidRole(); }
 
-    function isDirectivo() {
-      return isAuthenticated();
-    }
-
-    // 1. Colección de Usuarios y Roles
     match /usuarios/{userId} {
-      allow read: if isAuthenticated();
-      allow write: if isSuperUsuario() || (isAuthenticated() && request.auth.uid == userId);
+      allow read: if signedIn() && (request.auth.uid == userId || isSuperUsuario());
+      // The browser must never assign claims or change a role-bearing profile.
+      allow write: if false;
     }
 
-    // 2. Colección de Alumnos y Expedientes
     match /alumnos/{matricula} {
-      allow read: if isAuthenticated();
+      allow read: if canReadSchoolData();
       allow create, update, delete: if isTrabajadoraSocial();
-
       match /notas_confidenciales/{notaId} {
-        allow read, write: if isTrabajadoraSocial();
-      }
-    }
-
-    // 3. Colección de Incidentes Disciplinarios
-    match /incidentes/{incidenteId} {
-      allow read: if isAuthenticated();
-      allow create, update, delete: if isTrabajadoraSocial();
-
-      match /anexos_comentarios/{comentarioId} {
-        allow read: if isAuthenticated();
-        allow create, update: if isTrabajadoraSocial();
-      }
-
-      match /auditoria/{logId} {
-        allow read: if isAuthenticated();
+        allow read: if canReadSchoolData();
         allow create: if isTrabajadoraSocial();
+        allow update, delete: if false;
       }
     }
 
-    // 4. Colección de Control de Retardos
+    match /incidentes/{incidenteId} {
+      allow read: if canReadSchoolData();
+      allow create: if isTrabajadoraSocial();
+      // Once closed, the ticket itself is immutable. Corrections belong in comments.
+      allow update: if isTrabajadoraSocial() && resource.data.estatus != 'CERRADO';
+      allow delete: if false;
+
+      match /comentarios/{comentarioId} {
+        allow read: if canReadSchoolData();
+        allow create: if isTrabajadoraSocial();
+        allow update, delete: if false;
+      }
+      match /auditoria_cambios/{logId} {
+        allow read: if canReadSchoolData();
+        allow create: if isTrabajadoraSocial();
+        allow update, delete: if false;
+      }
+      // Legacy collection names remain read-only for existing data.
+      match /anexos_comentarios/{comentarioId} {
+        allow read: if canReadSchoolData();
+        allow write: if false;
+      }
+      match /auditoria/{logId} {
+        allow read: if canReadSchoolData();
+        allow write: if false;
+      }
+    }
+
     match /retardos/{retardoId} {
-      allow read: if isAuthenticated();
-      allow create, update, delete: if isTrabajadoraSocial();
+      allow read: if canReadSchoolData();
+      allow create: if isTrabajadoraSocial();
+      allow update, delete: if false;
     }
-
-    // 5. Colección de Salidas Extraordinarias de Menor
-    match /salidas_extraordinarias/{salidaId} {
-      allow read: if isAuthenticated();
-      allow create, update, delete: if isTrabajadoraSocial();
-    }
-
-    // 6. Colección de Justificantes Médicos
-    match /justificantes/{justificantesId} {
-      allow read: if isAuthenticated();
-      allow create, update, delete: if isTrabajadoraSocial();
-    }
-
-    // 7. Colección de Canalizaciones Externas
-    match /canalizaciones/{canalizacionId} {
-      allow read: if isAuthenticated();
-      allow create, update, delete: if isTrabajadoraSocial();
-    }
-
-    // 8. Colección de Eventos Rápidos (Compatibilidad Dashboard)
     match /eventos_rapidos/{eventoId} {
-      allow read: if isAuthenticated();
-      allow create, update, delete: if isTrabajadoraSocial();
+      allow read: if canReadSchoolData();
+      allow create: if isTrabajadoraSocial();
+      allow update, delete: if false;
+    }
+    match /salidas_extraordinarias/{salidaId} {
+      allow read: if canReadSchoolData();
+      allow create: if isTrabajadoraSocial();
+      allow update, delete: if false;
+    }
+    match /justificantes/{justificanteId} {
+      allow read: if canReadSchoolData();
+      allow create: if isTrabajadoraSocial();
+      allow update, delete: if false;
+    }
+    match /canalizaciones/{canalizacionId} {
+      allow read: if canReadSchoolData();
+      allow create: if isTrabajadoraSocial();
+      allow update: if isTrabajadoraSocial()
+        && request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly(['estatus', 'observaciones_seguimiento']);
+      allow delete: if false;
     }
 
-    // 9. Catálogos Configurables de Sistema
     match /cat_colonias/{coloniaId} {
-      allow read: if isAuthenticated();
-      allow write: if isTrabajadoraSocial();
+      allow read: if canReadSchoolData();
+      allow create: if isTrabajadoraSocial()
+        && request.resource.data.pendiente_revision == true
+        && request.resource.data.creada_por_usuario == true;
+      allow update, delete: if isSuperUsuario();
     }
-
     match /cat_faltas/{faltaId} {
-      allow read: if isAuthenticated();
-      allow write: if isTrabajadoraSocial();
+      allow read: if canReadSchoolData();
+      allow write: if isSuperUsuario();
     }
-
     match /cat_instituciones_canalizacion/{instId} {
-      allow read: if isAuthenticated();
+      allow read: if canReadSchoolData();
       allow write: if isSuperUsuario();
     }
   }

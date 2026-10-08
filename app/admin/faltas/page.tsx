@@ -39,10 +39,10 @@ export default function FaltasAdminPage() {
     loadData();
   }, []);
 
-  if (!user || (user.role !== "SUPER_USUARIO" && user.role !== "TRABAJADORA_SOCIAL")) {
+  if (!user || user.role !== "SUPER_USUARIO") {
     return (
       <div className="p-8 text-center text-rose-600 font-semibold">
-        Acceso restringido: Solo Administradores y Trabajo Social pueden gestionar el catálogo de faltas.
+        Acceso restringido: Solo Super Usuario puede gestionar el catálogo de faltas.
       </div>
     );
   }

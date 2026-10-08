@@ -60,6 +60,7 @@ export interface ContactoOficial {
   telefono_trabajo?: string;
   ine_folio?: string;
   ine_url?: string;
+  puede_recoger?: boolean;
 }
 
 export interface Domicilio {
@@ -101,16 +102,20 @@ export interface Alumno {
   creado_el?: string;
 }
 
-export function calcularEdad(fechaNacimiento: string): number {
-  if (!fechaNacimiento) return 0;
+export function calcularEdad(fechaNacimiento: string): number | null {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(fechaNacimiento || "");
+  if (!match) return null;
+  const [, year, month, day] = match;
+  const nac = new Date(Number(year), Number(month) - 1, Number(day));
+  if (nac.getFullYear() !== Number(year) || nac.getMonth() !== Number(month) - 1 || nac.getDate() !== Number(day)) return null;
   const hoy = new Date();
-  const nac = new Date(fechaNacimiento);
+  if (nac > hoy) return null;
   let edad = hoy.getFullYear() - nac.getFullYear();
   const mes = hoy.getMonth() - nac.getMonth();
   if (mes < 0 || (mes === 0 && hoy.getDate() < nac.getDate())) {
     edad--;
   }
-  return Math.max(0, edad);
+  return edad;
 }
 
 export function generarMatriculaPorGrado(grado: 1 | 2 | 3, consecutivo: number): string {
@@ -173,6 +178,8 @@ export interface Incidente {
   categoria: string;
   severidad: SeveridadFalta;
   implicados: ImplicadoIncidente[];
+  personal_involucrado?: string[];
+  materia?: string;
   descripcion_hechos: string;
   estatus: EstatusIncidente;
   dias_suspension: number;
@@ -210,7 +217,7 @@ export interface AuditLogEntry {
 
 export interface EventoRapido {
   id: string;
-  tipo: 'PASE_SALIDA' | 'RETARDO_MASIVO';
+  tipo: 'PASE_SALIDA' | 'RETARDO_MASIVO' | 'RETARDO_INDIVIDUAL';
   alumno_matricula: string;
   alumno_nombre: string;
   grado_grupo: string;

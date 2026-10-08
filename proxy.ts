@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 
-export function middleware(request: NextRequest) {
+export function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
   const sessionCookie = request.cookies.get("zentiva_session");
 
@@ -13,7 +13,9 @@ export function middleware(request: NextRequest) {
     pathname.startsWith("/api/public") ||
     pathname === "/favicon.ico";
 
-  const isAuthenticated = !!sessionCookie?.value;
+  // Optimistic navigation hint only. Firestore authorization is enforced by
+  // signed Firebase ID-token claims in firestore.rules.
+  const isAuthenticated = sessionCookie?.value === "1";
 
   // 1. Unauthenticated user attempting to access protected route -> Redirect to /login
   if (!isAuthenticated && !isPublicPath) {

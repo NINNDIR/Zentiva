@@ -136,6 +136,7 @@ export const AlumnoModalForm: React.FC<Props> = ({
         id: "c1",
         prioridad: 1,
         es_tutor_legal: true,
+        puede_recoger: true,
         nombre: t1Nombre.toUpperCase(),
         parentesco: t1Parentesco,
         telefono: t1Telefono,
@@ -150,6 +151,7 @@ export const AlumnoModalForm: React.FC<Props> = ({
         id: "c2",
         prioridad: 2,
         es_tutor_legal: false,
+        puede_recoger: true,
         nombre: t2Nombre.toUpperCase(),
         parentesco: t2Parentesco,
         telefono: t2Telefono,
@@ -163,6 +165,7 @@ export const AlumnoModalForm: React.FC<Props> = ({
         id: "c3",
         prioridad: 3,
         es_tutor_legal: false,
+        puede_recoger: true,
         nombre: t3Nombre.toUpperCase(),
         parentesco: t3Parentesco,
         telefono: t3Telefono,
@@ -338,12 +341,13 @@ export const AlumnoModalForm: React.FC<Props> = ({
                 </label>
                 <span className="text-xs font-bold text-cyan-800 bg-cyan-100 px-2.5 py-0.5 rounded-full border border-cyan-200 flex items-center gap-1 shadow-2xs">
                   <span>🎂 Edad calculada:</span>
-                  <strong className="text-cyan-950 font-black">{calcularEdad(fechaNacimiento)} años</strong>
+                  <strong className="text-cyan-950 font-black">{calcularEdad(fechaNacimiento) === null ? "Fecha inválida" : `${calcularEdad(fechaNacimiento)} años`}</strong>
                 </span>
               </div>
               <input
                 type="date"
                 required
+                max={new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 10)}
                 value={fechaNacimiento}
                 onChange={(e) => setFechaNacimiento(e.target.value)}
                 className="w-full p-2.5 bg-slate-50 border border-slate-300 rounded-lg text-sm focus:outline-none focus:border-cyan-600 font-medium"

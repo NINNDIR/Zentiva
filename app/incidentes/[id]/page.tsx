@@ -18,7 +18,6 @@ import {
   FileText,
   AlertTriangle,
   History,
-  RotateCcw,
   FileCheck,
   Building2,
 } from "lucide-react";
@@ -155,14 +154,10 @@ export default function IncidenteDetailPage() {
             </button>
 
             {incidente.estatus === "CERRADO" ? (
-              <button
-                onClick={() => setIsReopenModalOpen(true)}
-                className="px-3.5 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-xs font-semibold shadow transition flex items-center space-x-1.5"
-              >
-                <RotateCcw className="w-4 h-4" />
-                <span>Reabrir Ticket</span>
-              </button>
-            ) : (
+              <span className="px-3.5 py-2 bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-lg text-xs font-semibold">
+                Ticket cerrado · solo lectura; agrega seguimiento en anexos
+              </span>
+            ) : user.role !== "DIRECTIVO" ? (
               <button
                 onClick={handleToggleFirma}
                 className={`px-3.5 py-2 rounded-lg text-xs font-bold shadow transition flex items-center space-x-1.5 ${
@@ -178,7 +173,7 @@ export default function IncidenteDetailPage() {
                     : "Marcar Convenio Firmado"}
                 </span>
               </button>
-            )}
+            ) : null}
           </div>
         </div>
 
@@ -217,6 +212,17 @@ export default function IncidenteDetailPage() {
                       </span>
                     </div>
                   ))}
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 rounded-lg bg-slate-50 p-4 border border-slate-200">
+                <div>
+                  <h3 className="text-[11px] font-bold text-slate-700 uppercase mb-1">Personal involucrado</h3>
+                  <p className="text-xs text-slate-900">{incidente.personal_involucrado?.join(", ") || "No registrado"}</p>
+                </div>
+                <div>
+                  <h3 className="text-[11px] font-bold text-slate-700 uppercase mb-1">Materia / área</h3>
+                  <p className="text-xs text-slate-900">{incidente.materia || "No especificada"}</p>
                 </div>
               </div>
 
@@ -264,7 +270,7 @@ export default function IncidenteDetailPage() {
             <ActivityStream
               incidenteId={incidente.id}
               currentUser={user}
-              canAddComment={incidente.estatus !== "CERRADO" || user.role === "SUPER_USUARIO" || user.role === "TRABAJADORA_SOCIAL"}
+              canAddComment={user.role !== "DIRECTIVO"}
             />
           </div>
 
@@ -281,7 +287,8 @@ export default function IncidenteDetailPage() {
                   <select
                     value={incidente.estatus}
                     onChange={(e) => handleEstatusChange(e.target.value as EstatusIncidente)}
-                    className="w-full text-xs font-bold p-2.5 bg-slate-50 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-600"
+                    disabled={incidente.estatus === "CERRADO" || user.role === "DIRECTIVO"}
+                    className="w-full text-xs font-bold p-2.5 bg-slate-50 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-600 disabled:opacity-60"
                   >
                     <option value="ABIERTO">ABIERTO</option>
                     <option value="EN PROCESO">EN PROCESO</option>

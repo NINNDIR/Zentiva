@@ -5,6 +5,10 @@
 .env
 .env.local
 .env*.local
+*-firebase-admin.json
+firebase-adminsdk-*.json
+service-account*.json
+serviceAccountKey*.json
 
 # Build de Next.js
 /.next/
